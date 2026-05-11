@@ -1,4 +1,8 @@
 import { describe, test, expect } from "bun:test"
+import { Database } from "bun:sqlite"
+import { existsSync, unlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { session_list, session_read, session_search, session_info } from "./tools"
 import type { ToolContext } from "@opencode-ai/plugin/tool"
 
@@ -7,6 +11,61 @@ const mockContext: ToolContext = {
   messageID: "test-message",
   agent: "test-agent",
   abort: new AbortController().signal,
+}
+
+function withEnv<T>(values: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
+  const previous: Record<string, string | undefined> = {}
+  for (const key of Object.keys(values)) {
+    previous[key] = process.env[key]
+    const value = values[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  return run().finally(() => {
+    for (const key of Object.keys(values)) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+}
+
+function createSearchDB(): string {
+  const dbPath = join(tmpdir(), `omo-tools-search-${Date.now()}-${Math.random().toString(36).slice(2)}.db`)
+  const db = new Database(dbPath)
+  db.run("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL)")
+  db.run("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL)")
+  db.run("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, data TEXT NOT NULL)")
+  db.run("INSERT INTO session (id, title) VALUES (?, ?)", ["ses_sql", "SQL Session"])
+  db.run("INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)", ["msg_sql", "ses_sql", Date.now(), JSON.stringify({ role: "user" })])
+  db.run("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)", ["prt_sql", "msg_sql", "ses_sql", JSON.stringify({ type: "text", text: "needle from SQL backend" })])
+  db.close()
+  return dbPath
+}
+
+function createVectorAdapter(sessionID = "ses_vector"): string {
+  const adapterPath = join(tmpdir(), `omo-tools-vector-${Date.now()}-${Math.random().toString(36).slice(2)}.py`)
+  const payload = {
+    results: [
+      {
+        path: `opencode://${sessionID}`,
+        session_id: sessionID,
+        message_id: "msg_vector",
+        title: "Vector Session",
+        score: 0.2,
+        match_type: ["semantic"],
+        snippet: "needle from vector backend",
+        source_type: "opencode_session",
+        heading_path: "message/assistant",
+      },
+    ],
+  }
+  writeFileSync(adapterPath, `#!/usr/bin/env python3\nimport json\nprint(${JSON.stringify(JSON.stringify(payload))})\n`)
+  return adapterPath
+}
+
+function removeIfExists(path: string): void {
+  if (existsSync(path)) unlinkSync(path)
 }
 
 describe("session-manager tools", () => {
@@ -108,6 +167,66 @@ describe("session-manager tools", () => {
     }, mockContext)
     
     expect(typeof result).toBe("string")
+  })
+
+  test("session_search returns no matches for empty query before calling adapters", async () => {
+    const adapterPath = createVectorAdapter("ses_vector_empty")
+    try {
+      await withEnv({ OPENCODE_DB: "/missing/opencode.db", OMO_SESSION_SEARCH_VECTOR_ADAPTER: adapterPath }, async () => {
+        const result = await session_search.execute({ query: "   ", limit: 5 }, mockContext)
+
+        expect(result).toBe("No matches found.")
+      })
+    } finally {
+      removeIfExists(adapterPath)
+    }
+  })
+
+  test("session_search uses SQL backend when vector adapter is absent", async () => {
+    const dbPath = createSearchDB()
+    try {
+      await withEnv({ OPENCODE_DB: dbPath, OMO_SESSION_SEARCH_VECTOR_ADAPTER: "/missing/query_lancedb.py" }, async () => {
+        const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
+
+        expect(result).toContain("SQL Session")
+        expect(result).toContain("needle from SQL backend")
+      })
+    } finally {
+      removeIfExists(dbPath)
+    }
+  })
+
+  test("session_search falls back to vector backend when SQL schema is unavailable", async () => {
+    const dbPath = join(tmpdir(), `omo-tools-bad-schema-${Date.now()}.db`)
+    const db = new Database(dbPath)
+    db.run("CREATE TABLE unrelated (id TEXT)")
+    db.close()
+    const adapterPath = createVectorAdapter()
+    try {
+      await withEnv({ OPENCODE_DB: dbPath, OMO_SESSION_SEARCH_VECTOR_ADAPTER: adapterPath }, async () => {
+        const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
+
+        expect(result).toContain("Vector Session")
+        expect(result).toContain("needle from vector backend")
+        expect(result).toContain("[vector]")
+      })
+    } finally {
+      removeIfExists(dbPath)
+      removeIfExists(adapterPath)
+    }
+  })
+
+  test("session_search applies session_id filter to vector results", async () => {
+    const adapterPath = createVectorAdapter("ses_target")
+    try {
+      await withEnv({ OPENCODE_DB: "/missing/opencode.db", OMO_SESSION_SEARCH_VECTOR_ADAPTER: adapterPath }, async () => {
+        const result = await session_search.execute({ query: "needle", session_id: "ses_other", limit: 5 }, mockContext)
+
+        expect(result).toBe("No matches found.")
+      })
+    } finally {
+      removeIfExists(adapterPath)
+    }
   })
 
   test("session_info handles non-existent session", async () => {

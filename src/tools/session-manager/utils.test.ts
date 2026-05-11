@@ -5,7 +5,7 @@ import {
   formatSessionInfo,
   formatSearchResults,
   filterSessionsByDate,
-  searchInSession,
+  mergeAndDedupeSearchResults,
 } from "./utils"
 import type { SessionInfo, SessionMessage, SearchResult } from "./types"
 
@@ -149,16 +149,64 @@ describe("session-manager utils", () => {
     expect(Array.isArray(result)).toBe(true)
   })
 
-  test("searchInSession finds matches case-insensitively", async () => {
+  test("mergeAndDedupeSearchResults deduplicates SQL and vector hits by message", () => {
     // #given
-    const sessionID = "ses_nonexistent"
-    const query = "test"
+    const sqlResult: SearchResult = {
+      session_id: "ses_test123",
+      message_id: "msg_001",
+      role: "user",
+      excerpt: "exact match",
+      match_count: 2,
+      match_type: ["text"],
+      source: "sql",
+      title: "Test Session",
+      score: 0.9,
+    }
+    const duplicateVector: SearchResult = {
+      ...sqlResult,
+      excerpt: "semantic duplicate",
+      source: "vector",
+      score: 0.95,
+    }
 
     // #when
-    const results = await searchInSession(sessionID, query, false)
+    const results = mergeAndDedupeSearchResults([sqlResult], [duplicateVector], 10)
 
     // #then
-    expect(Array.isArray(results)).toBe(true)
-    expect(results.length).toBe(0)
+    expect(results).toHaveLength(1)
+    expect(results[0].source).toBe("sql")
+  })
+
+  test("mergeAndDedupeSearchResults sorts by normalized score and applies limit", () => {
+    // #given
+    const lowScoreSql: SearchResult = {
+      session_id: "ses_a",
+      message_id: "msg_a",
+      role: "user",
+      excerpt: "low",
+      match_count: 1,
+      match_type: ["data"],
+      source: "sql",
+      title: "A",
+      score: 0.55,
+    }
+    const highScoreVector: SearchResult = {
+      session_id: "ses_a",
+      message_id: "msg_b",
+      role: "assistant",
+      excerpt: "high",
+      match_count: 1,
+      match_type: ["semantic"],
+      source: "vector",
+      title: "A",
+      score: 0.8,
+    }
+
+    // #when
+    const results = mergeAndDedupeSearchResults([lowScoreSql], [highScoreVector], 1)
+
+    // #then
+    expect(results).toHaveLength(1)
+    expect(results[0].message_id).toBe("msg_b")
   })
 })

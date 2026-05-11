@@ -1,5 +1,5 @@
 import type { SessionInfo, SessionMessage, SearchResult } from "./types"
-import { getSessionInfo, readSessionMessages } from "./storage"
+import { getSessionInfo } from "./storage"
 
 export async function formatSessionList(sessionIDs: string[]): Promise<string> {
   if (sessionIDs.length === 0) {
@@ -178,62 +178,6 @@ export async function filterSessionsByDate(
     if (to && info.last_message > to) continue
 
     results.push(id)
-  }
-
-  return results
-}
-
-export async function searchInSession(
-  sessionID: string,
-  query: string,
-  caseSensitive = false,
-  maxResults?: number
-): Promise<SearchResult[]> {
-  const messages = await readSessionMessages(sessionID)
-  const results: SearchResult[] = []
-
-  const searchQuery = caseSensitive ? query : query.toLowerCase()
-
-  for (const msg of messages) {
-    if (maxResults && results.length >= maxResults) break
-
-    let matchCount = 0
-    const excerpts: string[] = []
-
-    for (const part of msg.parts) {
-      if (part.type === "text" && part.text) {
-        const text = caseSensitive ? part.text : part.text.toLowerCase()
-        const matches = text.split(searchQuery).length - 1
-        if (matches > 0) {
-          matchCount += matches
-
-          const index = text.indexOf(searchQuery)
-          if (index !== -1) {
-            const start = Math.max(0, index - 50)
-            const end = Math.min(text.length, index + searchQuery.length + 50)
-            let excerpt = part.text.substring(start, end)
-            if (start > 0) excerpt = "..." + excerpt
-            if (end < text.length) excerpt = excerpt + "..."
-            excerpts.push(excerpt)
-          }
-        }
-      }
-    }
-
-    if (matchCount > 0) {
-      results.push({
-        session_id: sessionID,
-        message_id: msg.id,
-        role: msg.role,
-        excerpt: excerpts[0] || "",
-        match_count: matchCount,
-        timestamp: msg.time?.created,
-        match_type: ["text"],
-        source: "sql",
-        title: "",
-        score: Math.min(1.0, matchCount * 0.1),
-      })
-    }
   }
 
   return results

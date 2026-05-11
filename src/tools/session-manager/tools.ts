@@ -5,7 +5,7 @@ import {
   SESSION_SEARCH_DESCRIPTION,
   SESSION_INFO_DESCRIPTION,
 } from "./constants"
-import { getAllSessions, getMainSessions, getSessionInfo, readSessionMessages, readSessionTodos, sessionExists } from "./storage"
+import { getMainSessions, getSessionInfo, readSessionMessages, readSessionTodos, sessionExists } from "./storage"
 import {
   filterSessionsByDate,
   formatSessionInfo,
@@ -13,21 +13,12 @@ import {
   formatSessionMessages,
   formatSearchResults,
   mergeAndDedupeSearchResults,
-  searchInSession,
 } from "./utils"
 import { searchSessions } from "./sql-search"
 import { queryVectorAdapter } from "./vector-adapter"
 import type { SessionListArgs, SessionReadArgs, SessionSearchArgs, SessionInfoArgs, SearchResult } from "./types"
 
 const VECTOR_TIMEOUT_MS = 10_000
-const SQL_TIMEOUT_MS = 30_000
-
-function withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${operation} timed out after ${ms}ms`)), ms)),
-  ])
-}
 
 export const session_list: ToolDefinition = tool({
   description: SESSION_LIST_DESCRIPTION,
@@ -98,28 +89,25 @@ export const session_search: ToolDefinition = tool({
   execute: async (args: SessionSearchArgs, _context) => {
     try {
       const resultLimit = args.limit && args.limit > 0 ? args.limit : 20
+      if (!args.query.trim()) return formatSearchResults([])
 
-      const sqlResults: SearchResult[] = await withTimeout(
-        Promise.resolve(
-          searchSessions({
-            query: args.query,
-            sessionID: args.session_id,
-            caseSensitive: args.case_sensitive,
-            limit: resultLimit,
-          }),
-        ),
-        SQL_TIMEOUT_MS,
-        "SQL search",
-      ).catch(() => [])
+      let sqlResults: SearchResult[] = []
+      try {
+        sqlResults = searchSessions({
+          query: args.query,
+          sessionID: args.session_id,
+          caseSensitive: args.case_sensitive,
+          limit: resultLimit,
+        })
+      } catch {
+        sqlResults = []
+      }
 
-      const vectorResults: SearchResult[] = await withTimeout(
-        queryVectorAdapter(args.query, {
-          topK: resultLimit,
-          sessionId: args.session_id,
-        }),
-        VECTOR_TIMEOUT_MS,
-        "Vector search",
-      ).catch(() => [])
+      const vectorResults: SearchResult[] = await queryVectorAdapter(args.query, {
+        topK: resultLimit * 4,
+        sessionId: args.session_id,
+        timeoutMs: VECTOR_TIMEOUT_MS,
+      }).catch(() => [])
 
       const merged = mergeAndDedupeSearchResults(sqlResults, vectorResults, resultLimit)
 
