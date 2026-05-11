@@ -74,7 +74,7 @@ describe("vector-adapter", () => {
       expect(results.length).toBe(1)
       expect(results[0].session_id).toBe("ses_test")
       expect(results[0].title).toBe("Test Session")
-      expect(results[0].score).toBe(0.85)
+      expect(results[0].score).toBeCloseTo(1 / 1.85)
       expect(results[0].source).toBe("vector")
       expect(results[0].match_type).toContain("semantic")
     })
@@ -178,7 +178,7 @@ describe("vector-adapter", () => {
       expect(results).toEqual([])
     })
 
-    test("deduplicates by session_id within vector results", async () => {
+    test("keeps distinct vector chunks from the same session", async () => {
       const adapterPath = createTempAdapter()
       const mockStdout = JSON.stringify({
         results: [
@@ -215,8 +215,8 @@ describe("vector-adapter", () => {
       })
 
       const sesDup = results.filter((r) => r.session_id === "ses_dup")
-      expect(sesDup.length).toBe(1)
-      expect(sesDup[0].score).toBe(0.9)
+      expect(sesDup.length).toBe(2)
+      expect(new Set(sesDup.map((r) => r.message_id)).size).toBe(2)
     })
 
     test("message_id is deterministic for same input", async () => {
@@ -435,6 +435,30 @@ describe("vector-adapter", () => {
 
       expect(results.length).toBe(1)
       expect(results[0].session_id).toBe("ses_good")
+    })
+
+    test("uses semantic opencode mode without source DB fallback", async () => {
+      const adapterPath = createTempAdapter()
+      let capturedArgs: string[] = []
+      const mockSpawn = ((_cmd: string, args: string[], _opts: Record<string, unknown>, cb: ExecFileCallback) => {
+        capturedArgs = args
+        cb(null, JSON.stringify({ results: [] }), "")
+      }) as unknown as typeof import("node:child_process").execFile
+
+      await queryVectorAdapter("test", {
+        adapterPath,
+        spawnOverride: mockSpawn,
+      })
+
+      expect(capturedArgs).toContain("--source")
+      expect(capturedArgs).toContain("opencode")
+      expect(capturedArgs).toContain("--mode")
+      expect(capturedArgs).toContain("semantic")
+      expect(capturedArgs).toContain("--opencode-db")
+      const dbArgIndex = capturedArgs.indexOf("--opencode-db") + 1
+      expect(dbArgIndex).toBeGreaterThan(0)
+      expect(capturedArgs[dbArgIndex]).toContain("omo-session-search-no-source-opencode-")
+      expect(existsSync(capturedArgs[dbArgIndex])).toBe(false)
     })
   })
 })
