@@ -122,6 +122,24 @@ function seedTestData(db: Database) {
      VALUES (?, ?, ?, ?, ?, ?)`,
     ["prt_b3", "msg_b1", "ses_beta", now - 68000, now - 68000, JSON.stringify({ type: "text", text: "Cache hit rate is 50% with 4x speedup and 42_days retention" })]
   )
+  db.run(
+    `INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    ["prt_b4", "msg_b1", "ses_beta", now - 67000, now - 67000, JSON.stringify({ type: "text", text: "中文检索应该能命中这条消息" })]
+  )
+
+  for (let i = 0; i < 5; i++) {
+    db.run(
+      `INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [`prt_late_${i}`, "msg_a1", "ses_alpha", now - 66000 + i, now - 66000 + i, JSON.stringify({ type: "text", text: `early filler ${i}` })]
+    )
+  }
+  db.run(
+    `INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    ["prt_late_match", "msg_a1", "ses_alpha", now - 65000, now - 65000, JSON.stringify({ type: "text", text: "late evidence should appear in the excerpt" })]
+  )
 }
 
 beforeAll(() => {
@@ -146,7 +164,25 @@ describe("sql-search", () => {
 
       // #then
       expect(result).toContain("opencode.db")
-      expect(result).toContain(".local/share/opencode")
+      expect(result).toContain("opencode")
+    })
+
+    test("resolves relative OPENCODE_DB inside OpenCode data directory", () => {
+      // #given
+      const previous = process.env.OPENCODE_DB
+      process.env.OPENCODE_DB = "custom.db"
+
+      try {
+        // #when
+        const result = getDBPath()
+
+        // #then
+        expect(result).toContain("opencode")
+        expect(result.endsWith("custom.db")).toBe(true)
+      } finally {
+        if (previous === undefined) delete process.env.OPENCODE_DB
+        else process.env.OPENCODE_DB = previous
+      }
     })
   })
 
@@ -308,6 +344,24 @@ describe("sql-search", () => {
       // #then
       expect(underscoreResults.length).toBeGreaterThanOrEqual(1)
       expect(underscoreResults.some((r) => r.excerpt.includes("42_days"))).toBe(true)
+    })
+
+    test("handles CJK queries", () => {
+      // #when
+      const results = searchSessionsSQL(testDB, { query: "中文检索", limit: 10 })
+
+      // #then
+      expect(results.length).toBeGreaterThanOrEqual(1)
+      expect(results.some((r) => r.excerpt.includes("中文检索"))).toBe(true)
+    })
+
+    test("uses the matched part as excerpt evidence", () => {
+      // #when
+      const results = searchSessionsSQL(testDB, { query: "late evidence", limit: 10 })
+
+      // #then
+      expect(results.length).toBeGreaterThanOrEqual(1)
+      expect(results[0].excerpt).toContain("late evidence")
     })
   })
 })

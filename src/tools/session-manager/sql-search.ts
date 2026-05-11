@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite"
 import { existsSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
+import { getDataDir } from "../../shared/data-path"
 import type { SearchResult } from "./types"
 
 export interface SQLSearchOptions {
@@ -17,13 +17,25 @@ interface SearchRow {
   message_id: string
   mtime: number
   data: string
+  matched_part_data?: string | null
 }
 
 export function getDBPath(): string {
-  if (process.env.OPENCODE_DB) {
-    return process.env.OPENCODE_DB
+  const dataDir = join(getDataDir(), "opencode")
+  const configured = process.env.OPENCODE_DB?.trim()
+  if (configured) {
+    if (configured === ":memory:" || isAbsolute(configured)) return configured
+    return join(dataDir, configured)
   }
-  return join(homedir(), ".local", "share", "opencode", "opencode.db")
+
+  const channel = process.env.OPENCODE_CHANNEL?.trim()
+  const disableChannelDB = process.env.OPENCODE_DISABLE_CHANNEL_DB
+  if (channel && !disableChannelDB && !["latest", "beta", "prod"].includes(channel)) {
+    const safe = channel.replace(/[^a-zA-Z0-9._-]/g, "-")
+    return join(dataDir, `opencode-${safe}.db`)
+  }
+
+  return join(dataDir, "opencode.db")
 }
 
 function openDB(): Database | null {
@@ -62,6 +74,48 @@ function snippetAround(text: string, query: string, contextSize = 80): string {
   return result
 }
 
+function extractPartText(data: string): { text: string; raw: string } {
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = JSON.parse(data || "{}") as Record<string, unknown>
+  } catch {
+    return { text: data || "", raw: data || "" }
+  }
+
+  const fragments: string[] = []
+  if (typeof parsed.text === "string" && parsed.text) fragments.push(parsed.text)
+  if (typeof parsed.thinking === "string" && parsed.thinking) fragments.push(parsed.thinking)
+
+  const state = parsed.state
+  if (typeof state === "object" && state !== null) {
+    const stateObj = state as Record<string, unknown>
+    if (typeof stateObj.title === "string" && stateObj.title) fragments.push(stateObj.title)
+    if (typeof stateObj.output === "string" && stateObj.output) fragments.push(stateObj.output)
+  }
+
+  if (typeof parsed.prompt === "string" && parsed.prompt) fragments.push(parsed.prompt)
+  if (typeof parsed.description === "string" && parsed.description) fragments.push(parsed.description)
+
+  const raw = JSON.stringify(parsed)
+  return { text: fragments.join(" | "), raw }
+}
+
+function countMatches(text: string, term: string): number {
+  if (!term) return 0
+  let count = 0
+  let pos = 0
+  while ((pos = text.indexOf(term, pos)) !== -1) {
+    count++
+    pos += term.length
+  }
+  return count
+}
+
+function scoreFor(matchTypes: string[], matchCount: number): number {
+  const base = matchTypes.includes("text") ? 0.7 : 0.55
+  return Math.min(1.0, base + Math.min(matchCount, 6) * 0.05)
+}
+
 function executeSQLSearch(
   db: Database,
   terms: string[],
@@ -72,14 +126,14 @@ function executeSQLSearch(
   const results: SearchResult[] = []
   const seen = new Set<string>()
 
-  function searchColumn(table: string, term: string): void {
+  function searchColumn(table: "part" | "message", term: string): void {
     if (results.length >= limit) return
 
     const whereCol = table === "message" ? "m.data" : "part.data"
     const joinClause = table === "part" ? "JOIN part ON part.message_id = m.id" : ""
     const select = table === "part"
-      ? "SELECT DISTINCT s.id as session_id, s.title as session_title, m.id as message_id, m.time_created as mtime, m.data as data"
-      : "SELECT s.id as session_id, s.title as session_title, m.id as message_id, m.time_created as mtime, m.data as data"
+      ? "SELECT s.id as session_id, s.title as session_title, m.id as message_id, m.time_created as mtime, m.data as data, part.data as matched_part_data"
+      : "SELECT s.id as session_id, s.title as session_title, m.id as message_id, m.time_created as mtime, m.data as data, NULL as matched_part_data"
 
     const termParam = caseSensitive ? term : term.toLowerCase()
     const instrExpr = caseSensitive
@@ -117,45 +171,35 @@ function executeSQLSearch(
       }
       const role = typeof parsed.role === "string" ? parsed.role : "unknown"
 
-      const partRows = db
-        .query("SELECT data FROM part WHERE message_id = ? ORDER BY id LIMIT 5")
-        .all(row.message_id) as { data: string }[]
+      const partRows = table === "part" && row.matched_part_data
+        ? [{ data: row.matched_part_data }]
+        : db
+          .query("SELECT data FROM part WHERE message_id = ? ORDER BY id LIMIT 5")
+          .all(row.message_id) as { data: string }[]
 
-      const textParts: string[] = []
-      for (const pr of partRows) {
-        try {
-          const pd = JSON.parse(pr.data || "{}") as Record<string, unknown>
-          if (typeof pd.text === "string" && pd.text) {
-            textParts.push(pd.text)
-          } else if (typeof pd.thinking === "string" && pd.thinking) {
-            textParts.push(pd.thinking)
-          }
-        } catch {
-          continue
-        }
-      }
-
-      const combined = textParts.join(" | ")
+      const extractedParts = partRows.map((pr) => extractPartText(pr.data))
+      const combined = extractedParts.map((part) => part.text).filter(Boolean).join(" | ")
+      const rawCombined = extractedParts.map((part) => part.raw).filter(Boolean).join(" | ")
       const searchCombined = caseSensitive ? combined : combined.toLowerCase()
+      const searchRawCombined = caseSensitive ? rawCombined : rawCombined.toLowerCase()
       const searchTerm = caseSensitive ? term : term.toLowerCase()
-      let matchCount = 0
       const matchTypes: string[] = []
-      let searchPos = 0
-      while ((searchPos = searchCombined.indexOf(searchTerm, searchPos)) !== -1) {
-        matchCount++
-        searchPos += searchTerm.length
-      }
+
+      let matchCount = countMatches(searchCombined, searchTerm)
       if (matchCount > 0) {
         matchTypes.push("text")
       }
 
       if (matchCount === 0) {
-        const dataStr = caseSensitive ? JSON.stringify(parsed) : JSON.stringify(parsed).toLowerCase()
-        let p = 0
-        while ((p = dataStr.indexOf(searchTerm, p)) !== -1) {
-          matchCount++
-          p += searchTerm.length
+        matchCount = countMatches(searchRawCombined, searchTerm)
+        if (matchCount > 0) {
+          matchTypes.push("data")
         }
+      }
+
+      if (matchCount === 0) {
+        const dataStr = caseSensitive ? JSON.stringify(parsed) : JSON.stringify(parsed).toLowerCase()
+        matchCount = countMatches(dataStr, searchTerm)
         if (matchCount > 0) {
           matchTypes.push("data")
         }
@@ -163,18 +207,17 @@ function executeSQLSearch(
 
       if (matchCount === 0) {
         const dataRaw = caseSensitive ? (row.data || "") : (row.data || "").toLowerCase()
-        let pr = 0
-        while ((pr = dataRaw.indexOf(searchTerm, pr)) !== -1) {
-          matchCount++
-          pr += searchTerm.length
-        }
+        matchCount = countMatches(dataRaw, searchTerm)
         if (matchCount > 0 && !matchTypes.includes("data")) {
           matchTypes.push("data")
         }
       }
 
-      const excerpt = combined
-        ? snippetAround(combined, term)
+      if (matchCount === 0) continue
+
+      const excerptSource = combined && matchTypes.includes("text") ? combined : rawCombined
+      const excerpt = excerptSource
+        ? snippetAround(excerptSource, term)
         : snippetAround(JSON.stringify(parsed), term, 120)
 
       seen.add(key)
@@ -183,12 +226,12 @@ function executeSQLSearch(
         message_id: row.message_id || "",
         role,
         excerpt,
-        match_count: matchCount || 1,
+        match_count: matchCount,
         timestamp: typeof row.mtime === "number" ? row.mtime : undefined,
         match_type: matchTypes.length > 0 ? matchTypes : ["text"],
         source: "sql",
         title: row.session_title || "",
-        score: Math.min(1.0, (matchCount || 1) * 0.1),
+        score: scoreFor(matchTypes, matchCount),
       })
     }
   }
