@@ -415,7 +415,7 @@ Disable specific hooks in config:
 |------|-------------|
 | **session_list** | List all OpenCode sessions |
 | **session_read** | Read messages and history from a session |
-| **session_search** | Full-text search across session messages |
+| **session_search** | Read-only SQLite keyword search across OpenCode sessions, optionally augmented by derived vector-index semantic results |
 | **session_info** | Get session metadata and statistics |
 
 ---
