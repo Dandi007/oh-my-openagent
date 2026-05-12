@@ -57,6 +57,8 @@ oh-my-opencode session-vector build [--db <path>] [--index <path>] [--manifest <
 
 The build command reads OpenCode's SQLite database read-only, extracts text from session messages and parts, embeds each chunk through the configured HTTP embedding endpoint, and writes the derived LanceDB index plus a manifest file. The source database is never mutated; its checksum is verified before and after the build.
 
+The manifest records per-source build statistics: `sessions`, `messages`, `parts`, `chunks`, `source_bytes`, and `source_sha256`. These fields are strict schema requirements; a manifest missing any of them fails validation and causes the vector adapter to return `[]`.
+
 **Query path** (`session_search`) only reads the pre-built index. It resolves the vector runtime environment, loads the manifest, validates it against the `opencode` source namespace, embeds the query string, and searches LanceDB. If any step fails (missing config, missing index, missing manifest, embedding error, LanceDB error), the vector adapter returns `[]` and SQL keyword results continue unaffected.
 
 #### Environment Variables
@@ -69,7 +71,7 @@ The build command reads OpenCode's SQLite database read-only, extracts text from
 | `AGENT_EMBEDDING_API_KEY` | No | API key for the embedding endpoint |
 | `AGENT_VECTOR_DB_PATH` | No | Vector index directory path (overridden by `--index` in build, used by query) |
 | `AGENT_VECTOR_MANIFEST` | No | Manifest JSON file path (overridden by `--manifest` in build, used by query) |
-| `AGENT_VECTOR_DB_BACKEND` | No | Backend selection (`lancedb`, `qdrant`, `noop`; defaults to `noop`) |
+| `AGENT_VECTOR_DB_BACKEND` | No | Backend selection (`lancedb`, `qdrant`, `noop`). When unset, query defaults to `lancedb` using the internal LanceDB cache path; when set to a non-lancedb backend, vector query returns `[]`. |
 | `AGENT_VECTOR_TIMEOUT_MS` | No | Timeout for vector operations in milliseconds |
 
 #### Cache Path Resolution
@@ -83,7 +85,7 @@ When `AGENT_VECTOR_DB_PATH` and `AGENT_VECTOR_MANIFEST` are not set, the build a
 
 Vector search is non-fatal. The following conditions each cause the vector adapter to return `[]` while SQL keyword search continues:
 
-- `AGENT_VECTOR_DB_BACKEND` is not `lancedb` or is unset
+- `AGENT_VECTOR_DB_BACKEND` is set to a non-lancedb backend (e.g., `qdrant`, `noop`)
 - `AGENT_VECTOR_DB_PATH` is not configured and the cache default does not exist
 - `AGENT_EMBEDDING_ENDPOINT` is not configured
 - The LanceDB index directory does not exist on disk
