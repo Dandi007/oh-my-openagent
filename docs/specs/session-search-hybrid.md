@@ -6,12 +6,12 @@ Implemented for PR review in `fix/session-search-sql-vector`.
 
 ## Goal
 
-`session_search` must search current OpenCode session history without scanning legacy JSON files. The primary path is a read-only SQLite keyword search against OpenCode's canonical `opencode.db`; the optional enhancement path queries a derived Search Note vector index for semantic matches.
+`session_search` must search current OpenCode session history without scanning legacy JSON files. The primary path is a read-only SQLite keyword search against OpenCode's canonical `opencode.db`; the optional enhancement path queries an internal LanceDB-derived vector index for semantic matches.
 
 ## Non-Goals
 
 - Do not mutate or migrate OpenCode's source SQLite database.
-- Do not require Search Note, LanceDB, or Python dependencies for keyword search to work.
+- Do not require LanceDB or embedding dependencies for keyword search to work.
 - Do not use the vector adapter as a second source-DB keyword fallback; direct SQL owns source DB fallback.
 
 ## Architecture
@@ -19,7 +19,7 @@ Implemented for PR review in `fix/session-search-sql-vector`.
 ```mermaid
 flowchart LR
   A[session_search args] --> B[SQLite keyword adapter]
-  A --> C[Search Note vector adapter]
+  A --> C[Internal LanceDB vector adapter]
   B --> D[Merge and dedupe]
   C --> D
   D --> E[Formatted results]
@@ -47,13 +47,55 @@ The database is opened with Bun SQLite `readonly: true` and `PRAGMA query_only =
 
 ### Derived Vector Index
 
-The vector adapter is optional. It discovers `query_lancedb.py` from `OMO_SESSION_SEARCH_VECTOR_ADAPTER` first, then known Search Note locations. It invokes:
+The vector adapter is optional and uses an internal LanceDB runtime with an HTTP embedding client. It does not invoke external scripts or depend on external knowledge-base paths.
+
+**Build is separate from query.** The vector index must be built ahead of time via the CLI:
 
 ```bash
-python3 query_lancedb.py <query> --source opencode --mode semantic --top-k <n> --opencode-db <nonexistent-db>
+oh-my-opencode session-vector build [--db <path>] [--index <path>] [--manifest <path>] [--limit <n>] [--json]
 ```
 
-`--mode semantic` and a unique nonexistent `--opencode-db` keep this path constrained to the derived `opencode_sessions` LanceDB table. If the derived index, adapter script, Python, LanceDB, or embedding backend is unavailable, the adapter returns no results and SQL search remains available.
+The build command reads OpenCode's SQLite database read-only, extracts text from session messages and parts, embeds each chunk through the configured HTTP embedding endpoint, and writes the derived LanceDB index plus a manifest file. The source database is never mutated; its checksum is verified before and after the build.
+
+**Query path** (`session_search`) only reads the pre-built index. It resolves the vector runtime environment, loads the manifest, validates it against the `opencode` source namespace, embeds the query string, and searches LanceDB. If any step fails (missing config, missing index, missing manifest, embedding error, LanceDB error), the vector adapter returns `[]` and SQL keyword results continue unaffected.
+
+#### Environment Variables
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `AGENT_EMBEDDING_ENDPOINT` | Yes (for vector) | HTTP embedding API endpoint (OpenAI-compatible protocol) |
+| `AGENT_EMBEDDING_MODEL` | Yes (for vector) | Embedding model name |
+| `AGENT_EMBEDDING_DIMENSIONS` | Yes (for vector) | Embedding vector dimensions (positive integer) |
+| `AGENT_EMBEDDING_API_KEY` | No | API key for the embedding endpoint |
+| `AGENT_VECTOR_DB_PATH` | No | Vector index directory path (overridden by `--index` in build, used by query) |
+| `AGENT_VECTOR_MANIFEST` | No | Manifest JSON file path (overridden by `--manifest` in build, used by query) |
+| `AGENT_VECTOR_DB_BACKEND` | No | Backend selection (`lancedb`, `qdrant`, `noop`; defaults to `noop`) |
+| `AGENT_VECTOR_TIMEOUT_MS` | No | Timeout for vector operations in milliseconds |
+
+#### Cache Path Resolution
+
+When `AGENT_VECTOR_DB_PATH` and `AGENT_VECTOR_MANIFEST` are not set, the build and query paths fall back to XDG cache:
+
+- Index: `${XDG_CACHE_HOME:-~/.cache}/oh-my-opencode/vector/opencode-sessions`
+- Manifest: `${XDG_CACHE_HOME:-~/.cache}/oh-my-opencode/vector/vector-manifest.json`
+
+#### Missing Index / Config Behavior
+
+Vector search is non-fatal. The following conditions each cause the vector adapter to return `[]` while SQL keyword search continues:
+
+- `AGENT_VECTOR_DB_BACKEND` is not `lancedb` or is unset
+- `AGENT_VECTOR_DB_PATH` is not configured and the cache default does not exist
+- `AGENT_EMBEDDING_ENDPOINT` is not configured
+- The LanceDB index directory does not exist on disk
+- `AGENT_VECTOR_MANIFEST` is not configured and the cache default does not exist
+- The manifest file is missing, malformed, or fails schema validation
+- The manifest does not contain the `opencode` source namespace
+- The embedding HTTP request fails or returns an error
+- The LanceDB query fails (missing table, schema mismatch, etc.)
+
+#### Source Database Immutability
+
+OpenCode's SQLite database is opened with `readonly: true` and `PRAGMA query_only = ON`. The vector build verifies the source database checksum before and after reading to guarantee no mutation occurs. Vector data is always derived and rebuildable: deleting the LanceDB index and manifest and re-running `session-vector build` produces identical results from the same source database.
 
 ## Query Semantics
 
@@ -67,7 +109,7 @@ python3 query_lancedb.py <query> --source opencode --mode semantic --top-k <n> -
 ## Session Filter Semantics
 
 - SQL applies `session_id` in the SQLite query.
-- Vector results are filtered client-side because the current Search Note adapter contract does not expose adapter-side `session_id` filtering. The caller requests extra vector candidates (`limit * 4`) before local filtering to reduce missed results.
+- Vector results are filtered client-side because the internal vector adapter performs session filtering after the LanceDB query. The caller requests extra vector candidates (`limit * 4`) before local filtering to reduce missed results.
 - If adapter-side session filtering is added later, it should preserve the same public `session_search` argument and result contract.
 
 ## Merge, Dedupe, and Ranking
@@ -82,12 +124,12 @@ python3 query_lancedb.py <query> --source opencode --mode semantic --top-k <n> -
 
 - Missing `opencode.db`: SQL returns no results.
 - SQL schema mismatch or query failure: SQL degrades to no results; vector can still return matches.
-- Missing vector adapter or derived index: vector returns no results; SQL can still return matches.
+- Missing vector config, index, or manifest: vector returns no results; SQL can still return matches.
 - Vector timeout: the adapter returns no results after the configured timeout.
 
 ## Performance Boundaries
 
-The SQL adapter is a read-only keyword fallback, not the long-term indexing layer. It uses `instr()` over JSON text in `message.data` and `part.data`, so it cannot use ordinary OpenCode indexes for the text predicate and may scan large tables. `session_search` therefore keeps SQL bounded by token count and result limit, and avoids pretending a synchronous SQLite scan is cancellable. Large-install semantic performance should be improved in the derived Search Note `opencode_sessions` index, not by mutating OpenCode's source database or adding source DB indexes.
+The SQL adapter is a read-only keyword fallback, not the long-term indexing layer. It uses `instr()` over JSON text in `message.data` and `part.data`, so it cannot use ordinary OpenCode indexes for the text predicate and may scan large tables. `session_search` therefore keeps SQL bounded by token count and result limit, and avoids pretending a synchronous SQLite scan is cancellable. Large-install semantic performance should be improved in the derived LanceDB `opencode_sessions` index, not by mutating OpenCode's source database or adding source DB indexes.
 
 ## Test Matrix
 
@@ -103,14 +145,14 @@ bun run build
 Coverage requirements:
 
 - `sql-search.test.ts`: SQL matching, case sensitivity, `session_id`, limit, literal `%/_`, CJK, matched-part excerpt evidence, empty input.
-- `vector-adapter.test.ts`: missing adapter, subprocess failure, malformed JSON, stderr tolerance, timeout, source filtering, client-side session filtering, same-session multi-hit preservation, derived-only semantic invocation.
+- `vector-adapter.test.ts`: missing config, missing index, missing manifest, embedding failure, LanceDB query failure, source filtering, client-side session filtering, same-session multi-hit preservation, dedupe, real-env no-create guard.
 - `utils.test.ts`: merge/dedupe behavior, score sorting, limit truncation.
 - `tools.test.ts`: end-to-end `session_search` wiring for SQL-only, vector fallback after SQL schema failure, and vector `session_id` filtering.
 
 ## Acceptance Criteria
 
 - OpenCode source database remains read-only and unchanged.
-- Search Note/vector integration remains optional and derived-index-only.
+- Vector integration remains optional and derived-index-only.
 - `SESSION_SEARCH_DESCRIPTION` and `docs/features.md` match the hybrid behavior.
 - All required self-tests pass before the PR is considered review-ready.
 

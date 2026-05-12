@@ -415,7 +415,7 @@ Disable specific hooks in config:
 |------|-------------|
 | **session_list** | List all OpenCode sessions |
 | **session_read** | Read messages and history from a session |
-| **session_search** | Read-only SQLite keyword search across OpenCode sessions, optionally augmented by derived vector-index semantic results |
+| **session_search** | Read-only SQLite keyword search across OpenCode sessions, optionally augmented by an internal LanceDB-derived vector index for semantic matches. The vector index must be pre-built via `session-vector build`; `session_search` only queries and never builds or rebuilds. Missing vector config, index, or manifest is non-fatal: semantic results are omitted and SQL keyword results continue. OpenCode's SQLite database is read-only; vector data is derived and rebuildable. |
 | **session_info** | Get session metadata and statistics |
 
 ---
