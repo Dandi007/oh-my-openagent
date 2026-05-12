@@ -15,10 +15,10 @@ export type VectorBackend = "lancedb" | "qdrant" | "noop"
 
 /**
  * Source namespace for vector rows.
- * Known values: "opencode", "markdown", "facts", "all".
- * Open-ended string allows future namespaces without contract breakage.
+ * Open string alias — source selection belongs to query/source adapter contract,
+ * not global env.
  */
-export type SourceNamespace = "opencode" | "markdown" | "facts" | "all" | string
+export type SourceNamespace = string
 
 /**
  * Resolved runtime environment derived from Env Contract variables.
@@ -27,8 +27,6 @@ export type SourceNamespace = "opencode" | "markdown" | "facts" | "all" | string
  * accidental logging or serialization.
  */
 export interface ResolvedVectorRuntimeEnv {
-  /** Logical root for derived agent knowledge state. */
-  knowledgeRoot?: string
   /** Resolved vector backend identifier. */
   backend: VectorBackend
   /** Filesystem backend: local vector database path. */
@@ -46,8 +44,6 @@ export interface ResolvedVectorRuntimeEnv {
     /** Embedding vector dimension count. */
     dimensions?: number
   }
-  /** Source namespace filter. */
-  source?: SourceNamespace
   /** Query or write operation timeout budget in milliseconds. */
   timeoutMs?: number
 }
@@ -72,7 +68,7 @@ export interface ManifestSourceContract {
   table: string
   /** Schema version identifier for this source's row format. */
   schema_version: string
-  /** Canonical source of truth (e.g. "opencode.db", "filesystem"). */
+  /** Canonical source-of-truth category: "database" or "external-system". */
   source_of_truth: string
   /** ISO-8601 timestamp of last successful index. */
   last_indexed_at: string

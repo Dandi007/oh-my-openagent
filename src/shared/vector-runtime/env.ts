@@ -38,7 +38,6 @@ const VECTOR_CONFIG_KEYS: ReadonlySet<string> = new Set([
   "AGENT_EMBEDDING_ENDPOINT",
   "AGENT_EMBEDDING_MODEL",
   "AGENT_EMBEDDING_DIMENSIONS",
-  "AGENT_VECTOR_SOURCE",
   "AGENT_VECTOR_TIMEOUT_MS",
 ])
 
@@ -121,7 +120,6 @@ export function resolveVectorRuntimeEnv(
 
   // Assemble resolved env — API keys are intentionally excluded
   const env: ResolvedVectorRuntimeEnv = {
-    knowledgeRoot: source["AGENT_KNOWLEDGE_ROOT"]?.trim() || undefined,
     backend,
     dbPath: source["AGENT_VECTOR_DB_PATH"]?.trim() || undefined,
     dbUri: source["AGENT_VECTOR_DB_URI"]?.trim() || undefined,
@@ -131,7 +129,6 @@ export function resolveVectorRuntimeEnv(
       model: source["AGENT_EMBEDDING_MODEL"]?.trim() || undefined,
       dimensions: dimsResult.value,
     },
-    source: source["AGENT_VECTOR_SOURCE"]?.trim() || undefined,
     timeoutMs: timeoutResult.value,
   }
 

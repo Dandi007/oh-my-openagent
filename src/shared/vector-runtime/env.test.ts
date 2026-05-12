@@ -27,14 +27,12 @@ describe("resolveVectorRuntimeEnv — empty input", () => {
     // #when resolving
     const result = resolve({})
     // #then every optional field is undefined
-    expect(result.env.knowledgeRoot).toBeUndefined()
     expect(result.env.dbPath).toBeUndefined()
     expect(result.env.dbUri).toBeUndefined()
     expect(result.env.manifestPath).toBeUndefined()
     expect(result.env.embedding.endpoint).toBeUndefined()
     expect(result.env.embedding.model).toBeUndefined()
     expect(result.env.embedding.dimensions).toBeUndefined()
-    expect(result.env.source).toBeUndefined()
     expect(result.env.timeoutMs).toBeUndefined()
     // #and vector_config_missing diagnostic is present
     expect(result.diagnostics).toHaveLength(1)
@@ -118,9 +116,8 @@ describe("resolveVectorRuntimeEnv — backend", () => {
 
 describe("resolveVectorRuntimeEnv — full mapping", () => {
   test("all known env vars are mapped correctly", () => {
-    // #given a complete set of env contract variables
+    // #given a complete set of env contract variables (spec-approved only)
     const input: Record<string, string | undefined> = {
-      AGENT_KNOWLEDGE_ROOT: "/tmp/agent-knowledge",
       AGENT_VECTOR_DB_BACKEND: "lancedb",
       AGENT_VECTOR_DB_PATH: "/tmp/lancedb",
       AGENT_VECTOR_DB_URI: "http://localhost:6333",
@@ -128,13 +125,11 @@ describe("resolveVectorRuntimeEnv — full mapping", () => {
       AGENT_EMBEDDING_ENDPOINT: "http://localhost:8080/v1/embeddings",
       AGENT_EMBEDDING_MODEL: "BAAI/bge-small-zh-v1.5",
       AGENT_EMBEDDING_DIMENSIONS: "512",
-      AGENT_VECTOR_SOURCE: "opencode",
       AGENT_VECTOR_TIMEOUT_MS: "30000",
     }
     // #when resolving
     const result = resolve(input)
     // #then every field is mapped correctly
-    expect(result.env.knowledgeRoot).toBe("/tmp/agent-knowledge")
     expect(result.env.backend).toBe("lancedb")
     expect(result.env.dbPath).toBe("/tmp/lancedb")
     expect(result.env.dbUri).toBe("http://localhost:6333")
@@ -142,7 +137,6 @@ describe("resolveVectorRuntimeEnv — full mapping", () => {
     expect(result.env.embedding.endpoint).toBe("http://localhost:8080/v1/embeddings")
     expect(result.env.embedding.model).toBe("BAAI/bge-small-zh-v1.5")
     expect(result.env.embedding.dimensions).toBe(512)
-    expect(result.env.source).toBe("opencode")
     expect(result.env.timeoutMs).toBe(30000)
     expect(result.diagnostics).toEqual([])
   })
@@ -307,11 +301,9 @@ describe("resolveVectorRuntimeEnv — edge cases", () => {
     // #given env vars with leading/trailing whitespace
     // #when resolving
     const result = resolve({
-      AGENT_KNOWLEDGE_ROOT: "  /tmp/root  ",
       AGENT_VECTOR_DB_PATH: "\t/path/to/db\n",
     })
     // #then values are trimmed
-    expect(result.env.knowledgeRoot).toBe("/tmp/root")
     expect(result.env.dbPath).toBe("/path/to/db")
   })
 
@@ -319,12 +311,10 @@ describe("resolveVectorRuntimeEnv — edge cases", () => {
     // #given env vars set to empty strings
     // #when resolving
     const result = resolve({
-      AGENT_KNOWLEDGE_ROOT: "",
       AGENT_VECTOR_DB_PATH: "",
       AGENT_VECTOR_MANIFEST: "",
     })
     // #then all are undefined
-    expect(result.env.knowledgeRoot).toBeUndefined()
     expect(result.env.dbPath).toBeUndefined()
     expect(result.env.manifestPath).toBeUndefined()
     // #and vector_config_missing diagnostic is emitted
@@ -359,12 +349,27 @@ describe("resolveVectorRuntimeEnv — edge cases", () => {
     expect(result.diagnostics.length).toBeGreaterThan(0)
   })
 
-  test("only AGENT_KNOWLEDGE_ROOT set still emits vector_config_missing", () => {
-    // #given only the non-vector-specific AGENT_KNOWLEDGE_ROOT
+  test("AGENT_KNOWLEDGE_ROOT is ignored and does not suppress vector_config_missing", () => {
+    // #given only the removed AGENT_KNOWLEDGE_ROOT env var
     // #when resolving
-    const result = resolve({ AGENT_KNOWLEDGE_ROOT: "/tmp/knowledge" })
-    // #then knowledgeRoot is resolved but vector_config_missing is emitted
-    expect(result.env.knowledgeRoot).toBe("/tmp/knowledge")
+    const result = resolve({ AGENT_KNOWLEDGE_ROOT: "/tmp/should-not-be-used" })
+    // #then knowledgeRoot is NOT populated in returned env
+    const serialized = JSON.stringify(result.env)
+    expect(serialized).not.toContain("should-not-be-used")
+    // #and vector_config_missing is still emitted (not suppressed)
+    expect(result.env.backend).toBe("noop")
+    expect(result.diagnostics).toHaveLength(1)
+    expect(result.diagnostics[0]).toContain("vector_config_missing")
+  })
+
+  test("AGENT_VECTOR_SOURCE is ignored and does not suppress vector_config_missing", () => {
+    // #given only the removed AGENT_VECTOR_SOURCE env var
+    // #when resolving
+    const result = resolve({ AGENT_VECTOR_SOURCE: "markdown" })
+    // #then source is NOT populated in returned env
+    const serialized = JSON.stringify(result.env)
+    expect(serialized).not.toContain("markdown")
+    // #and vector_config_missing is still emitted (not suppressed)
     expect(result.env.backend).toBe("noop")
     expect(result.diagnostics).toHaveLength(1)
     expect(result.diagnostics[0]).toContain("vector_config_missing")
