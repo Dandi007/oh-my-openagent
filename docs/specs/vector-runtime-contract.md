@@ -1,19 +1,19 @@
-# Vector Runtime Contract Spec
+# Vector Runtime Spec
 
 ## Status
 
-Draft for `fix/session-search-sql-vector`。
+Draft.
 
 ## Goal
 
-Vector search integration 必须通过一份稳定的运行时契约被 Oh My OpenAgent 与本地 Search Note skills 共享，而不是直接耦合到某个脚本、仓库路径或本机实现细节。两端都可以 query，也都可以写入 derived vector data，但所有 query 与 write 都必须遵守同一套 environment、manifest、schema 和 operation contract。
+定义一份稳定的 Vector Runtime 协议，让 Oh My OpenAgent 与本地 skills 通过共享的 environment、manifest、source adapter、query、write、concurrency 与 security contract 实现 vector retrieval，而不是各自耦合到特定 backend、路径或实现细节。两端都可以 query，也都可以写入 derived vector data，但所有操作必须遵守同一套协议。
 
 ## Non-Goals
 
-- 不让 Oh My OpenAgent 依赖 Search Note 的内部 Python 实现。
-- 不让 Search Note 依赖 Oh My OpenAgent 的 TypeScript 实现。
-- 不在 vector indexing 过程中修改 OpenCode source database。
-- 不把 user home、repo checkout 或 LanceDB-only storage assumption 硬编码进 caller。
+- 不让 OMO 依赖任何 skill 的内部实现。
+- 不让任何 skill 依赖 OMO 的内部实现。
+- 不在 vector indexing 过程中修改 source database。
+- 不把 user home、repo checkout 或特定 vector store 的 storage assumption 硬编码进 caller。
 - 不允许多个 writer 各自发明不兼容的 chunk ID、schema、manifest 或 embedding setting。
 
 ## Core Principle
@@ -22,21 +22,23 @@ Vector search integration 必须通过一份稳定的运行时契约被 Oh My Op
 Share the contract, not the implementation.
 ```
 
-Oh My OpenAgent、Search Note 与未来的本地 skills 只耦合到 `Vector Runtime Contract`。Runtime adapter 决定 backing store 是本地 LanceDB、远端 Qdrant、其他 vector database，还是 test fixture。
+OMO、本地 skills 与未来的 consumers 只耦合到 Vector Runtime Spec。Runtime adapter 决定 backing store 是本地 LanceDB、远端 Qdrant、其他 vector database，还是 test fixture。
 
 ```mermaid
 flowchart LR
-  OMO[Oh My OpenAgent] --> C[Vector Runtime Contract]
-  SN[Search Note skills] --> C
-  FS[Future skills] --> C
+  OMO[Oh My OpenAgent] --> C[Vector Runtime Spec]
+  SK[Local skills] --> C
+  FS[Future consumers] --> C
 
   C --> E[Env Contract]
   C --> M[Manifest Contract]
+  C --> SA[Source Adapter Contract]
   C --> Q[Query Contract]
   C --> W[Write Contract]
 
   E --> R[Runtime Adapter]
   M --> R
+  SA --> R
   Q --> R
   W --> R
   R --> V[(Vector Store)]
@@ -44,11 +46,10 @@ flowchart LR
 
 ## Env Contract
 
-环境变量只描述 runtime wiring，不承载 source-specific business logic。
+环境变量只描述 runtime wiring，不承载 source-specific business logic。source selection 属于 query / source adapter contract，不放在全局 env。
 
 | Variable | Required | Meaning |
 |---|---:|---|
-| `AGENT_KNOWLEDGE_ROOT` | no | Derived agent knowledge state 的逻辑根目录。 |
 | `AGENT_VECTOR_DB_BACKEND` | no | Vector backend 标识，例如 `lancedb` 或 `qdrant`。 |
 | `AGENT_VECTOR_DB_PATH` | no | Filesystem backend 使用的本地 vector database path。 |
 | `AGENT_VECTOR_DB_URI` | no | Service backend 使用的远端 vector database URI。 |
@@ -58,94 +59,115 @@ flowchart LR
 | `AGENT_EMBEDDING_API_KEY` | no | Embedding API credential。 |
 | `AGENT_EMBEDDING_MODEL` | no | Query vector 与 indexed chunk 使用的 embedding model。 |
 | `AGENT_EMBEDDING_DIMENSIONS` | no | Embedding vector dimension count。 |
-| `AGENT_VECTOR_SOURCE` | no | Source namespace filter，例如 `markdown`、`opencode`、`facts` 或 `all`。 |
 | `AGENT_VECTOR_TIMEOUT_MS` | no | Query 或 write operation 的 timeout budget。 |
 
-默认本地布局可以继续是：
-
-```text
-~/.cache/agent-knowledge/Zettelkasten/lancedb/
-~/.cache/agent-knowledge/Zettelkasten/*-manifest.json
-```
-
-Caller 必须把这些路径视为 default only。显式环境变量永远优先。
+Caller 必须把任何默认路径视为 default only。显式环境变量永远优先。
 
 ## Manifest Contract
 
 Manifest 是 query vector、stored vector、source schema 与 writer behavior 之间的兼容性校验点。Runtime 在返回 semantic results 或执行 write 前必须校验 manifest。
 
+Manifest 描述的是 runtime 级别的配置，不绑定到特定 consumer 的目录结构或 table 命名。每个 source namespace 在 manifest 中声明自己的 schema version、source-of-truth 类型与 freshness。
+
 ```json
 {
   "contract_version": "vector-runtime/v1",
-  "backend": "lancedb",
-  "db_path": "~/.cache/agent-knowledge/Zettelkasten/lancedb",
+  "backend": "<backend-identifier>",
+  "db_path": "<vector-store-path>",
   "embedding": {
-    "provider": "http",
-    "endpoint": "http://example.internal/v1/embeddings",
-    "model": "BAAI/bge-small-zh-v1.5",
-    "dimensions": 512
+    "provider": "<provider-type>",
+    "endpoint": "<embedding-api-endpoint>",
+    "model": "<model-identifier>",
+    "dimensions": 1536
   },
   "sources": {
-    "opencode": {
-      "table": "opencode_sessions",
-      "schema_version": "opencode-session-chunk/v1",
-      "source_of_truth": "opencode.db",
-      "last_indexed_at": "2026-05-12T00:00:00+08:00"
-    },
-    "markdown": {
-      "table": "chunks",
-      "schema_version": "markdown-chunk/v1",
-      "source_of_truth": "filesystem",
-      "last_indexed_at": "2026-05-12T00:00:00+08:00"
+    "<source-namespace>": {
+      "table": "<table-name>",
+      "schema_version": "<schema-version-identifier>",
+      "source_of_truth": "<database|external-system>",
+      "last_indexed_at": "<ISO-8601-timestamp>"
     }
   }
 }
 ```
+
+Manifest 中的 `sources` 条目由 source adapter 在 index 时注册。Consumer 通过 manifest 发现可用的 source namespace 及其 schema version，而不是通过硬编码的 table name 或文件路径。
 
 ## Invariants
 
 - `INV-1`: Query vector 必须使用与目标 source table 相同的 embedding model 与 dimensions 生成。
 - `INV-2`: Write 必须拒绝 schema version 与目标 source namespace 不匹配的 chunks。
 - `INV-3`: 相同 source object 与 chunk content 必须生成 deterministic chunk ID。
-- `INV-4`: Source database 与 source files 始终是 source of truth；vector tables 是 derived 且可重建。
+- `INV-4`: Source systems 始终是 source of truth；vector tables 是 derived 且可重建。
 - `INV-5`: Runtime caller 不能只因为 vector query 成功就推断 index fresh；freshness 只能来自 manifest。
 - `INV-6`: 多个 caller 可以写入，但必须使用同一套 write protocol 与 manifest update rules。
 
-## Source Namespace Contract
+## Source Adapter Contract
 
-每一条 vector row 都属于一个 `source` namespace。已知 namespace：
+Source adapter 是 source-of-truth 与 vector store 之间的桥接层。每个 source namespace 对应一个 source adapter，负责：
 
-| Source | Source of Truth | Typical Table | Chunk Identity |
-|---|---|---|---|
-| `opencode` | OpenCode SQLite database | `opencode_sessions` | `session_id + message_id + chunk_hash` |
-| `markdown` | Markdown files | `chunks` | `absolute_path + heading_path + chunk_hash` |
-| `facts` | Agent fact Markdown files | `facts` or `chunks` | `fact_id + chunk_hash` |
+- 声明 namespace identity 与 schema version。
+- 定义 canonical record identity：source object 在 source-of-truth 中的唯一标识方式。
+- 定义 chunk identity：如何从 source record 派生 deterministic chunk ID 与 chunk hash。
+- 定义 freshness：如何判断 source-of-truth 中的 record 是否比 vector store 中的 chunk 更新。
+- 将 source records 转换为符合 row schema 的 chunks。
+- 在 source-of-truth 不可达时，以明确的 failure mode 降级，不产生部分写入或损坏的 derived state。
 
-Minimum row fields：
+Source adapter 不拥有 vector store 的写入逻辑。写入逻辑由 Write Contract 统一约束。Source adapter 只负责"从 source 读到什么、如何切分为 chunks、如何标识 chunk identity"。
 
-| Field | Required | Meaning |
-|---|---:|---|
-| `source` | yes | Source namespace。 |
-| `chunk_id` | yes | Namespace 内 deterministic unique ID。 |
-| `chunk_text` | yes | 被 embedding 的文本。 |
-| `embedding` | yes | 由 manifest embedding settings 生成的 vector。 |
-| `metadata` | yes | Source-specific structured metadata。 |
-| `chunk_hash` | yes | 用于 incremental update decision 的 content hash。 |
-| `indexed_at` | yes | Index write timestamp。 |
-| `schema_version` | yes | Source row schema version。 |
+## SQLite Source Adapter Contract
+
+当 source-of-truth 是 SQLite database 时，source adapter 必须遵守以下额外约束：
+
+### Authority
+
+SQLite source database 是 authoritative 且 read-only。Source adapter 只能以只读模式打开 source database。任何情况下，derived vector data 的写入、更新、删除操作都不得 mutate source database 的 schema、table、row 或任何 byte。
+
+### Namespace and Schema
+
+Source adapter 必须在 manifest 中为对应的 source namespace 声明：
+
+- `source_of_truth`: 固定为 `database`。
+- `schema_version`: 与 source database schema 绑定的版本标识。source database schema 变更时，schema version 必须随之变更，旧 schema version 的 chunks 必须被视为 stale。
+- `table`: vector store 中该 namespace 对应的 table name。
+
+### Canonical Record Identity
+
+Source adapter 必须定义如何从 source database 的 row 派生 canonical record identity。Record identity 是 chunk identity 的前置输入。它必须满足：
+
+- 在 source database 的生命周期内唯一且稳定。
+- 不依赖 rowid 等可能因 VACUUM 或重建而变化的内部标识。
+- 优先使用业务主键或复合业务键。
+
+### Chunk Identity
+
+Source adapter 必须定义如何从 canonical record identity 与 chunk content 派生 deterministic chunk ID 与 chunk hash。同一 source record 的同一段 content 在任何时间、任何 writer 上都必须生成相同的 chunk ID。
+
+### Freshness
+
+Source adapter 必须定义 freshness 判断逻辑：给定一个 source record 和一个 vector store chunk，如何判断 chunk 是否需要 re-index。Freshness 可以基于 source record 的 modification timestamp、version column、content hash 对比，或这些方式的组合。
+
+### Failure Degradation
+
+当 source database 不可达、schema 不兼容、或 record 读取失败时，source adapter 必须：
+
+- 不写入任何 partial chunks。
+- 不修改 manifest 中的 `last_indexed_at`。
+- 返回明确的 error diagnostic，包含 failure scope（全量 / 单 record）与原因。
+- 不静默跳过 record 并报告 index 成功。
 
 ## Query Contract
 
-Query caller 提交 normalized request：
+Query caller 提交 normalized request。`source` 字段指定目标 source namespace，由 source adapter contract 定义其语义。
 
 ```json
 {
-  "query": "DeepSeek ksyun training",
-  "source": "opencode",
+  "query": "<natural-language-query>",
+  "source": "<source-namespace>",
   "mode": "semantic",
   "top_k": 10,
   "filters": {
-    "session_id": "optional-session-id"
+    "<field>": "<value>"
   }
 }
 ```
@@ -156,26 +178,24 @@ Runtime adapter 返回 normalized results：
 {
   "results": [
     {
-      "source": "opencode",
-      "chunk_id": "session:message:hash",
+      "source": "<source-namespace>",
+      "chunk_id": "<deterministic-chunk-id>",
       "score": 0.87,
-      "text": "matched chunk text",
+      "text": "<matched-chunk-text>",
       "metadata": {
-        "session_id": "ses_xxx",
-        "message_id": "msg_xxx",
-        "title": "Session title"
+        "<key>": "<value>"
       }
     }
   ],
   "diagnostics": {
-    "backend": "lancedb",
+    "backend": "<backend-identifier>",
     "manifest_validated": true,
     "semantic_available": true
   }
 }
 ```
 
-Semantic query failure 必须降级为 no semantic results + diagnostics。它不能静默查询无关 Markdown、临时 rebuild index，或通过意外 fallback path 读取 source database。
+Semantic query failure 必须降级为 no semantic results + diagnostics。它不能静默查询无关 source namespace、临时 rebuild index，或通过意外 fallback path 读取 source database。
 
 ## Write Contract
 
@@ -185,11 +205,11 @@ Runtime 支持 multiple writers through one shared protocol。这不是 single-w
 Single Write Contract, Multiple Writers.
 ```
 
-Allowed writers 包括 Oh My OpenAgent、Search Note 与未来 skills。所有 writer 必须遵守同一协议步骤。
+所有 writer 必须遵守同一协议步骤。
 
 ### Step 1: Resolve Runtime
 
-Writer 从 Env Contract 解析 backend、database location、embedding settings、manifest location、timeout 与 source namespace。
+Writer 从 Env Contract 解析 backend、database location、embedding settings、manifest location、timeout 与 target source namespace。
 
 ### Step 2: Validate Manifest
 
@@ -197,7 +217,7 @@ Writer 校验 `contract_version`、backend compatibility、embedding model、dim
 
 ### Step 3: Build Chunks
 
-Writer 将 source records 转为包含 deterministic `chunk_id`、`chunk_text`、`metadata`、`chunk_hash` 与 `schema_version` 的 rows。
+Writer 通过 source adapter 将 source records 转为包含 deterministic `chunk_id`、`chunk_text`、`metadata`、`chunk_hash` 与 `schema_version` 的 rows。
 
 ### Step 4: Embed Chunks
 
@@ -229,20 +249,6 @@ Runtime adapter 必须提供以下并发保证之一：
 - API keys 不得写入 manifests、vector rows、logs、diagnostics 或 test fixtures。
 - Query diagnostics 可以包含 provider name、backend name、model name 与 dimensions，但不能包含 credentials。
 
-## Oh My OpenAgent Integration Boundary
-
-Oh My OpenAgent 作为 contract consumer 调用 runtime：
-
-- Query 时提交 `source=opencode`、`mode=semantic`、`top_k` 与 optional filters。
-- Write 时提交从 OpenCode session data 派生出的 `source=opencode` chunks。
-- Fallback 时保持 direct OpenCode SQLite keyword search 与 vector runtime availability 独立。
-
-Oh My OpenAgent 不得在 public tool behavior 中要求 Search Note checkout、hard-coded Python file path 或 LanceDB-specific table name。
-
-## Search Note Integration Boundary
-
-Search Note 同样作为 contract consumer 调用 runtime，并且可以提供 runtime adapter 的一种实现。它的 Markdown 与 OpenCode index builders 必须发布 Oh My OpenAgent 可校验的 manifest entries，而不是要求 Oh My OpenAgent import Search Note internals。
-
 ## Failure Modes
 
 | Failure | Required Behavior |
@@ -254,21 +260,17 @@ Search Note 同样作为 contract consumer 调用 runtime，并且可以提供 r
 | Stale manifest | 只在 diagnostics 中标明 freshness 后返回结果。 |
 | Concurrent write conflict | Fail fast with retryable diagnostics；不得破坏 manifest。 |
 | Missing credential | 返回 no semantic results，或拒绝 write 并给出 credential diagnostics。 |
-
-## Compatibility With Current Session Search
-
-当前 `session_search` implementation 可以继续把 Search Note adapter 当作 bridge。Bridge 后续应通过 environment-driven runtime resolution 与 manifest validation 收敛到本 contract，替代 script-path coupling。
+| Source database unreachable | Source adapter 返回 error diagnostic；不写入 partial chunks，不更新 manifest freshness。 |
 
 ## Acceptance Criteria
 
-- Oh My OpenAgent 与 Search Note 可以通过环境变量指向同一个 vector runtime。
+- OMO 与本地 skills 可以通过环境变量指向同一个 vector runtime。
 - Query 与 write operation 都会在使用前校验 manifest compatibility。
 - 多个 writer 只能通过共享 Write Contract 写入 derived vector data。
 - Source data 保持 authoritative；vector data 保持 derived and rebuildable。
+- SQLite source database 在任何情况下不被 derived vector write 修改。
 - Credentials 不进入 Git、manifests、vector rows 或 logs。
 
 # References
 
-- `docs/specs/session-search-hybrid.md`
-- `src/tools/session-manager/vector-adapter.ts`
-- Search Note `query_lancedb.py` 与 index builders（当前 bridge implementation）
+- `docs/specs/session-search-hybrid.md` — consumer-specific implementation spec，定义 OpenCode session search 如何消费本协议。
