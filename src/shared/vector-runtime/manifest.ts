@@ -49,21 +49,17 @@ export type ManifestLoadResult = ManifestLoadOk | ManifestLoadErr
 /**
  * Resolve the manifest file path from the resolved runtime environment.
  *
- * Priority:
- * 1. `env.manifestPath` (from `AGENT_VECTOR_MANIFEST`)
- * 2. `${env.knowledgeRoot}/vector-manifest.json` (from `AGENT_KNOWLEDGE_ROOT`)
- * 3. `undefined` — no manifest path available
+ * Only uses explicit `env.manifestPath` (from `AGENT_VECTOR_MANIFEST`).
+ * Returns `undefined` when no manifest path is configured — there is no
+ * implicit fallback to other environment variables or filesystem locations.
  *
- * This function does not hard-code home, iCloud, or Search Note paths.
+ * This function does not hard-code any implementation-specific paths.
  */
 export function resolveManifestPath(
   env: ResolvedVectorRuntimeEnv,
 ): string | undefined {
   if (env.manifestPath) {
     return env.manifestPath
-  }
-  if (env.knowledgeRoot) {
-    return `${env.knowledgeRoot}/vector-manifest.json`
   }
   return undefined
 }
@@ -215,7 +211,7 @@ export function validateManifestForSource(
             )
           }
         } else {
-          warnings.push(
+          errors.push(
             `source "${source}" last_indexed_at "${sourceEntry.last_indexed_at}" is not a valid ISO-8601 timestamp`,
           )
         }

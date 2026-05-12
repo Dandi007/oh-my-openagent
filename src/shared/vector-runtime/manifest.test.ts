@@ -44,13 +44,13 @@ function makeValidManifest(
       opencode: {
         table: "opencode_sessions",
         schema_version: "opencode-session-chunk/v1",
-        source_of_truth: "opencode.db",
+        source_of_truth: "database",
         last_indexed_at: new Date().toISOString(),
       },
       markdown: {
         table: "chunks",
         schema_version: "markdown-chunk/v1",
-        source_of_truth: "filesystem",
+        source_of_truth: "external-system",
         last_indexed_at: new Date().toISOString(),
       },
     },
@@ -95,48 +95,27 @@ describe("resolveManifestPath", () => {
     expect(resolveManifestPath(env)).toBe("/custom/path/manifest.json")
   })
 
-  // #given an env with manifestPath and knowledgeRoot both set
-  // #when resolveManifestPath is called
-  // #then manifestPath takes priority over knowledgeRoot
-  it("prioritizes manifestPath over knowledgeRoot", () => {
-    const env = makeEnv({
-      manifestPath: "/explicit/manifest.json",
-      knowledgeRoot: "/some/knowledge/root",
-    })
-    expect(resolveManifestPath(env)).toBe("/explicit/manifest.json")
-  })
-
-  // #given an env with only knowledgeRoot set
-  // #when resolveManifestPath is called
-  // #then it returns knowledgeRoot/vector-manifest.json
-  it("falls back to knowledgeRoot/vector-manifest.json", () => {
-    const env = makeEnv({ knowledgeRoot: "/data/agent-knowledge" })
-    expect(resolveManifestPath(env)).toBe(
-      "/data/agent-knowledge/vector-manifest.json",
-    )
-  })
-
-  // #given an env with neither manifestPath nor knowledgeRoot
+  // #given an env with no manifestPath configured
   // #when resolveManifestPath is called
   // #then it returns undefined
-  it("returns undefined when neither manifestPath nor knowledgeRoot is set", () => {
+  it("returns undefined when no manifestPath is set", () => {
     const env = makeEnv()
     expect(resolveManifestPath(env)).toBeUndefined()
   })
 
-  // #given an env with empty string manifestPath and no knowledgeRoot
+  // #given an env with empty string manifestPath
   // #when resolveManifestPath is called
   // #then it returns undefined (empty string is falsy)
-  it("returns undefined for empty manifestPath and no knowledgeRoot", () => {
+  it("returns undefined for empty manifestPath", () => {
     const env = makeEnv({ manifestPath: "" })
     expect(resolveManifestPath(env)).toBeUndefined()
   })
 
-  // #given an env with empty string knowledgeRoot and no manifestPath
+  // #given an env with only non-manifest fields set (backend, embedding, etc.)
   // #when resolveManifestPath is called
-  // #then it returns undefined (empty string is falsy)
-  it("returns undefined for empty knowledgeRoot and no manifestPath", () => {
-    const env = makeEnv({ knowledgeRoot: "" })
+  // #then it returns undefined — no implicit fallback from other env fields
+  it("returns undefined when only non-manifest env fields are set", () => {
+    const env = makeEnv({ backend: "qdrant", dbPath: "/tmp/db" })
     expect(resolveManifestPath(env)).toBeUndefined()
   })
 })
@@ -476,15 +455,15 @@ describe("validateManifestForSource", () => {
 
   // #given a manifest with an invalid last_indexed_at format
   // #when validateManifestForSource is called
-  // #then it returns valid: true with a parse warning
-  it("warns when last_indexed_at is not a valid ISO-8601 timestamp", () => {
+  // #then it returns valid: false with a validation error (not warning)
+  it("rejects source entry with invalid last_indexed_at format", () => {
     const manifest = makeValidManifest()
     manifest.sources.opencode.last_indexed_at = "not-a-date"
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(true)
-    expect(result.warnings.length).toBeGreaterThan(0)
-    expect(result.warnings[0]).toContain("not a valid ISO-8601 timestamp")
+    expect(result.valid).toBe(false)
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(result.errors[0]).toContain("not a valid ISO-8601 timestamp")
   })
 
   // #given a valid manifest without env
