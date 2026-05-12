@@ -13,6 +13,7 @@ const mockConsoleError = mock(() => {})
 describe("install CLI - binary check behavior", () => {
   let tempDir: string
   let originalEnv: string | undefined
+  let originalFetch: typeof globalThis.fetch
   let isOpenCodeInstalledSpy: ReturnType<typeof spyOn>
   let getOpenCodeVersionSpy: ReturnType<typeof spyOn>
 
@@ -24,6 +25,9 @@ describe("install CLI - binary check behavior", () => {
     originalEnv = process.env.OPENCODE_CONFIG_DIR
     process.env.OPENCODE_CONFIG_DIR = tempDir
 
+    // Save and restore globalThis.fetch so mocks don't leak to other tests
+    originalFetch = globalThis.fetch
+
     // Reset config context
     configManager.resetConfigContext()
     configManager.initConfigContext("opencode", null)
@@ -34,6 +38,8 @@ describe("install CLI - binary check behavior", () => {
   })
 
   afterEach(() => {
+    globalThis.fetch = originalFetch
+
     if (originalEnv !== undefined) {
       process.env.OPENCODE_CONFIG_DIR = originalEnv
     } else {
