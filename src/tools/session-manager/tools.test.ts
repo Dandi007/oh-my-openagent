@@ -104,6 +104,12 @@ async function setupVectorBackend(sessionID: string): Promise<VectorBackendFixtu
         schema_version: "opencode-session-chunk/v1",
         source_of_truth: "database",
         last_indexed_at: new Date().toISOString(),
+        sessions: 1,
+        messages: 1,
+        parts: 0,
+        chunks: 1,
+        source_bytes: 128,
+        source_sha256: "a".repeat(64),
       },
     },
   }

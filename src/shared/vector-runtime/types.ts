@@ -72,6 +72,18 @@ export interface ManifestSourceContract {
   source_of_truth: string
   /** ISO-8601 timestamp of last successful index. */
   last_indexed_at: string
+  /** Number of source sessions observed during the build. */
+  sessions: number
+  /** Number of source messages observed during the build. */
+  messages: number
+  /** Number of source parts observed during the build. */
+  parts: number
+  /** Number of chunks written for this source. */
+  chunks: number
+  /** Source database/file size in bytes at build time. */
+  source_bytes: number
+  /** Source database/file SHA-256 digest at build time. */
+  source_sha256: string
 }
 
 /**

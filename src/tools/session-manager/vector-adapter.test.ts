@@ -101,6 +101,12 @@ function setupRealEnvFixture(): RealEnvFixture {
         schema_version: "opencode-session-chunk/v1",
         source_of_truth: "database",
         last_indexed_at: new Date().toISOString(),
+        sessions: 1,
+        messages: 1,
+        parts: 0,
+        chunks: 1,
+        source_bytes: 128,
+        source_sha256: "a".repeat(64),
       },
     },
   }
@@ -124,6 +130,29 @@ describe("vector-adapter", () => {
       })
 
       expect(results).toEqual([])
+    })
+
+    test("missing default cache path is non-fatal and does not create index directories", async () => {
+      const xdgCacheHome = join(tmpdir(), `omo-vec-adapter-default-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      const defaultIndexPath = join(xdgCacheHome, "oh-my-opencode", "vector", "opencode-sessions")
+
+      try {
+        expect(existsSync(defaultIndexPath)).toBe(false)
+
+        const results = await queryVectorAdapter("pipeline", {
+          _env: {
+            XDG_CACHE_HOME: xdgCacheHome,
+            AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
+            AGENT_EMBEDDING_MODEL: "test-model",
+            AGENT_EMBEDDING_DIMENSIONS: "4",
+          },
+        })
+
+        expect(results).toEqual([])
+        expect(existsSync(defaultIndexPath)).toBe(false)
+      } finally {
+        rmSync(xdgCacheHome, { recursive: true, force: true })
+      }
     })
 
     test("returns empty array when manifest path is not configured", async () => {

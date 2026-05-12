@@ -46,12 +46,24 @@ function makeValidManifest(
         schema_version: "opencode-session-chunk/v1",
         source_of_truth: "database",
         last_indexed_at: new Date().toISOString(),
+        sessions: 2,
+        messages: 3,
+        parts: 5,
+        chunks: 7,
+        source_bytes: 4096,
+        source_sha256: "a".repeat(64),
       },
       markdown: {
         table: "chunks",
         schema_version: "markdown-chunk/v1",
         source_of_truth: "external-system",
         last_indexed_at: new Date().toISOString(),
+        sessions: 0,
+        messages: 0,
+        parts: 0,
+        chunks: 1,
+        source_bytes: 1024,
+        source_sha256: "b".repeat(64),
       },
     },
     ...overrides,
@@ -423,6 +435,24 @@ describe("validateManifestForSource", () => {
     expect(result.valid).toBe(false)
     expect(result.errors).toContain(
       'source "opencode" source_of_truth is missing or empty',
+    )
+  })
+
+  // #given a manifest with invalid source stats
+  // #when validateManifestForSource is called
+  // #then it returns valid: false with source stats errors
+  it("rejects source entry with invalid source stats", () => {
+    const manifest = makeValidManifest()
+    manifest.sources.opencode.sessions = -1
+    manifest.sources.opencode.source_sha256 = "not-a-sha256"
+    const result = validateManifestForSource(manifest, "opencode")
+
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain(
+      'source "opencode" sessions must be a non-negative integer',
+    )
+    expect(result.errors).toContain(
+      'source "opencode" source_sha256 must be a lowercase SHA-256 hex digest',
     )
   })
 

@@ -14,6 +14,8 @@ import { z } from "zod"
 const vectorBackendSchema = z.enum(["lancedb", "qdrant", "noop"])
 
 const positiveIntSchema = z.number().int().positive()
+const nonNegativeIntSchema = z.number().int().nonnegative()
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/)
 
 // ── Manifest Contract Schemas ─────────────────────────────────────────
 
@@ -23,6 +25,12 @@ export const ManifestSourceSchema = z.object({
   schema_version: z.string().min(1),
   source_of_truth: z.enum(["database", "external-system"]),
   last_indexed_at: z.string().min(1),
+  sessions: nonNegativeIntSchema,
+  messages: nonNegativeIntSchema,
+  parts: nonNegativeIntSchema,
+  chunks: nonNegativeIntSchema,
+  source_bytes: nonNegativeIntSchema,
+  source_sha256: sha256Schema,
 }).strict()
 
 /** Schema for embedding configuration in the manifest. */

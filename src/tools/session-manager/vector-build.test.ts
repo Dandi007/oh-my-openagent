@@ -331,6 +331,12 @@ describe("buildOpenCodeSessionVectorIndex", () => {
       schema_version: "opencode-session-chunk/v1",
       source_of_truth: "database",
       last_indexed_at: "2026-05-12T12:34:56.000Z",
+      sessions: 1,
+      messages: 2,
+      parts: 6,
+      chunks: 7,
+      source_bytes: before.bytes,
+      source_sha256: before.sha256,
     })
   })
 

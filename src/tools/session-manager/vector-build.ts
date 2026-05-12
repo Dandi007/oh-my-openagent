@@ -324,6 +324,7 @@ function createManifest(
   options: OpenCodeSessionVectorBuildOptions,
   indexedAt: string,
   tableName: string,
+  stats: OpenCodeSessionVectorBuildStats,
 ): ManifestContract {
   return {
     contract_version: "vector-runtime/v1",
@@ -336,6 +337,12 @@ function createManifest(
         schema_version: OPENCODE_SCHEMA_VERSION,
         source_of_truth: "database",
         last_indexed_at: indexedAt,
+        sessions: stats.sessions,
+        messages: stats.messages,
+        parts: stats.parts,
+        chunks: stats.chunks,
+        source_bytes: stats.source_bytes,
+        source_sha256: stats.source_sha256,
       },
     },
   }
@@ -402,7 +409,15 @@ export async function buildOpenCodeSessionVectorIndex(
   const chunkIds = embeddedChunks.map((chunk) => chunk.chunk_id)
   await store.deleteMissing(OPENCODE_SOURCE, chunkIds)
 
-  const manifest = createManifest(options, indexedAt, tableName)
+  const stats: OpenCodeSessionVectorBuildStats = {
+    sessions: sessionCount,
+    messages: messageCount,
+    parts: partCount,
+    chunks: embeddedChunks.length,
+    source_bytes: sourceDbBefore.bytes,
+    source_sha256: sourceDbBefore.sha256,
+  }
+  const manifest = createManifest(options, indexedAt, tableName, stats)
   await Bun.write(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 
   const sourceDbAfter = fingerprint(options.sourceDbPath)
@@ -412,14 +427,7 @@ export async function buildOpenCodeSessionVectorIndex(
 
   return {
     manifest,
-    stats: {
-      sessions: sessionCount,
-      messages: messageCount,
-      parts: partCount,
-      chunks: embeddedChunks.length,
-      source_bytes: sourceDbBefore.bytes,
-      source_sha256: sourceDbBefore.sha256,
-    },
+    stats,
     sourceDbBefore,
     sourceDbAfter,
     chunkIds,

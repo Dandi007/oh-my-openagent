@@ -199,6 +199,22 @@ export function validateManifestForSource(
         errors.push(`source "${source}" source_of_truth is missing or empty`)
       }
 
+      const stats: Array<[string, number]> = [
+        ["sessions", sourceEntry.sessions],
+        ["messages", sourceEntry.messages],
+        ["parts", sourceEntry.parts],
+        ["chunks", sourceEntry.chunks],
+        ["source_bytes", sourceEntry.source_bytes],
+      ]
+      for (const [field, value] of stats) {
+        if (!Number.isInteger(value) || value < 0) {
+          errors.push(`source "${source}" ${field} must be a non-negative integer`)
+        }
+      }
+      if (!/^[a-f0-9]{64}$/.test(sourceEntry.source_sha256)) {
+        errors.push(`source "${source}" source_sha256 must be a lowercase SHA-256 hex digest`)
+      }
+
       // Freshness check: warn if last_indexed_at is older than 24 hours
       if (sourceEntry.last_indexed_at) {
         const indexedAt = Date.parse(sourceEntry.last_indexed_at)

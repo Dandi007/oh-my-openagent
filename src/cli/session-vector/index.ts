@@ -1,9 +1,9 @@
 import { Command } from "commander"
 import { existsSync, mkdirSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname } from "node:path"
 import { resolveVectorRuntimeEnv } from "../../shared/vector-runtime/env"
 import { createHttpEmbeddingClient } from "../../shared/vector-runtime/embedding-client"
+import { getDefaultVectorCachePaths } from "../../shared/vector-runtime/cache-paths"
 import { buildOpenCodeSessionVectorIndex } from "../../tools/session-manager/vector-build"
 import { getDBPath } from "../../tools/session-manager/sql-search"
 import type { ManifestEmbeddingContract } from "../../shared/vector-runtime/types"
@@ -17,28 +17,10 @@ function parsePositiveInt(value: string): number {
   return NaN
 }
 
-function getCacheDir(): string {
-  const xdgCache = process.env.XDG_CACHE_HOME?.trim()
-  if (xdgCache) return join(xdgCache, "oh-my-opencode", "vector")
-  return join(homedir(), ".cache", "oh-my-opencode", "vector")
-}
-
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-}
-
-function resolveDefaultIndexPath(): string {
-  const cacheDir = getCacheDir()
-  ensureDir(cacheDir)
-  return join(cacheDir, "opencode-sessions")
-}
-
-function resolveDefaultManifestPath(): string {
-  const cacheDir = getCacheDir()
-  ensureDir(cacheDir)
-  return join(cacheDir, "vector-manifest.json")
 }
 
 interface BuildOutput {
@@ -91,22 +73,26 @@ Environment:
           throw new Error(`source OpenCode database not found: ${sourceDbPath}`)
         }
 
+        const defaultCachePaths = getDefaultVectorCachePaths(undefined, {
+          createDirectories: true,
+        })
+        const envIndexPath = process.env.AGENT_VECTOR_DB_PATH?.trim()
+        const envManifestPath = process.env.AGENT_VECTOR_MANIFEST?.trim()
+
         // Resolve index path: explicit --index > AGENT_VECTOR_DB_PATH > cache default
         const indexPath: string =
           options.index ??
-          process.env.AGENT_VECTOR_DB_PATH?.trim() ??
-          resolveDefaultIndexPath()
+          (envIndexPath || defaultCachePaths.indexPath)
 
         // Resolve manifest path: explicit --manifest > AGENT_VECTOR_MANIFEST > cache default
         const manifestPath: string =
           options.manifest ??
-          process.env.AGENT_VECTOR_MANIFEST?.trim() ??
-          resolveDefaultManifestPath()
+          (envManifestPath || defaultCachePaths.manifestPath)
 
         // Ensure parent directory exists for index and manifest
-        const indexParent = join(indexPath, "..")
+        const indexParent = dirname(indexPath)
         ensureDir(indexParent)
-        const manifestParent = join(manifestPath, "..")
+        const manifestParent = dirname(manifestPath)
         ensureDir(manifestParent)
 
         // Resolve embedding config from environment

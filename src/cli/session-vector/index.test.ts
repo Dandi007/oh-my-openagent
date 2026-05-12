@@ -5,6 +5,7 @@ import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { $ } from "bun"
+import { queryVectorAdapter } from "../../tools/session-manager/vector-adapter"
 
 const CLEANUP_PATHS: string[] = []
 
@@ -282,6 +283,49 @@ describe("session-vector build CLI", () => {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
     expect(manifest.contract_version).toBe("vector-runtime/v1")
     expect(manifest.sources.opencode).toBeDefined()
+  })
+
+  test("default cache build output is queryable without vector path env vars", async () => {
+    const sourceDbPath = createFixtureDb("cli-default-cache")
+    const before = checksum(sourceDbPath)
+    const xdgCacheHome = tempPath("default-cache-xdg", "")
+    const expectedVectorDir = join(xdgCacheHome, "oh-my-opencode", "vector")
+    const expectedIndexPath = join(expectedVectorDir, "opencode-sessions")
+    const expectedManifestPath = join(expectedVectorDir, "vector-manifest.json")
+
+    const env = {
+      ...getEmbeddingEnv(),
+      XDG_CACHE_HOME: xdgCacheHome,
+      AGENT_VECTOR_DB_BACKEND: "",
+      AGENT_VECTOR_DB_PATH: "",
+      AGENT_VECTOR_MANIFEST: "",
+    }
+
+    const result = await $`bun --conditions=development run ${CLI_ENTRY} session-vector build \
+      --db ${sourceDbPath} \
+      --json`.env(env).nothrow().quiet()
+
+    const after = checksum(sourceDbPath)
+    expect(after).toEqual(before)
+
+    if (result.exitCode !== 0) {
+      throw new Error(`CLI failed: ${result.stderr.toString()}`)
+    }
+
+    const output = JSON.parse(result.stdout.toString())
+    expect(output.index_path).toBe(expectedIndexPath)
+    expect(output.manifest_path).toBe(expectedManifestPath)
+    expect(existsSync(expectedIndexPath)).toBe(true)
+    expect(existsSync(expectedManifestPath)).toBe(true)
+
+    const results = await queryVectorAdapter("CLI test message", {
+      _env: env,
+      topK: 3,
+    })
+
+    expect(results.length).toBeGreaterThan(0)
+    expect(results[0].session_id).toBe("ses_cli")
+    expect(results[0].source).toBe("vector")
   })
 
   test("fails with controlled error when embedding config is missing", async () => {

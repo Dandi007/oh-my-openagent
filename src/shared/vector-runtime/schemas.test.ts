@@ -14,6 +14,12 @@ const validManifestSource = {
   schema_version: "opencode-session-chunk/v1",
   source_of_truth: "database",
   last_indexed_at: "2026-05-12T00:00:00+08:00",
+  sessions: 2,
+  messages: 3,
+  parts: 5,
+  chunks: 7,
+  source_bytes: 4096,
+  source_sha256: "a".repeat(64),
 }
 
 const validManifest = {
@@ -33,6 +39,12 @@ const validManifest = {
       schema_version: "markdown-chunk/v1",
       source_of_truth: "external-system",
       last_indexed_at: "2026-05-12T00:00:00+08:00",
+      sessions: 0,
+      messages: 0,
+      parts: 0,
+      chunks: 1,
+      source_bytes: 1024,
+      source_sha256: "b".repeat(64),
     },
   },
 }
@@ -109,6 +121,37 @@ describe("ManifestSourceSchema", () => {
   it("rejects a source entry missing last_indexed_at", () => {
     const { last_indexed_at: _, ...missing } = validManifestSource
     const result = ManifestSourceSchema.safeParse(missing)
+    expect(result.success).toBe(false)
+  })
+
+  // #given a source entry missing required source stats
+  // #when parsed by ManifestSourceSchema
+  // #then it fails
+  it("rejects a source entry missing source stats", () => {
+    const { sessions: _, ...missing } = validManifestSource
+    const result = ManifestSourceSchema.safeParse(missing)
+    expect(result.success).toBe(false)
+  })
+
+  // #given a source entry with invalid source stats
+  // #when parsed by ManifestSourceSchema
+  // #then it fails
+  it("rejects invalid source stats", () => {
+    const result = ManifestSourceSchema.safeParse({
+      ...validManifestSource,
+      chunks: -1,
+    })
+    expect(result.success).toBe(false)
+  })
+
+  // #given a source entry with a malformed source hash
+  // #when parsed by ManifestSourceSchema
+  // #then it fails
+  it("rejects malformed source_sha256", () => {
+    const result = ManifestSourceSchema.safeParse({
+      ...validManifestSource,
+      source_sha256: "not-a-sha256",
+    })
     expect(result.success).toBe(false)
   })
 

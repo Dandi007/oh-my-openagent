@@ -14,6 +14,7 @@ import {
   createLanceDbVectorStore,
   type LanceDbVectorStore,
 } from "../../shared/vector-runtime/lancedb-adapter"
+import { getDefaultVectorCachePaths } from "../../shared/vector-runtime/cache-paths"
 import type { QueryResult } from "../../shared/vector-runtime/types"
 
 const OPENCODE_SOURCE = "opencode"
@@ -95,37 +96,44 @@ export async function queryVectorAdapter(
 
   const envInput = buildEnvInput(options._env, options.timeoutMs)
   const { env } = resolveVectorRuntimeEnv(envInput)
+  const rawBackend = envInput?.AGENT_VECTOR_DB_BACKEND?.trim()
+  const effectiveBackend = env.backend === "noop" && !rawBackend ? "lancedb" : env.backend
 
-  if (env.backend !== "lancedb") {
+  if (effectiveBackend !== "lancedb") {
     return []
   }
 
-  if (!env.dbPath) {
-    return []
-  }
+  const defaultCachePaths = getDefaultVectorCachePaths(envInput)
+  const dbPath = env.dbPath ?? defaultCachePaths.indexPath
+  const manifestPath = env.manifestPath ?? defaultCachePaths.manifestPath
 
   if (!env.embedding.endpoint) {
     return []
   }
 
-  if (!existsSync(env.dbPath)) {
+  if (!existsSync(dbPath)) {
     return []
   }
 
-  const manifestPath = resolveManifestPath(env)
-  if (!manifestPath) {
-    return []
-  }
+  const resolvedManifestPath = resolveManifestPath({ ...env, manifestPath })
+  if (!resolvedManifestPath) return []
 
-  const manifestResult = await loadManifest(manifestPath)
+  const manifestResult = await loadManifest(resolvedManifestPath)
   if (!manifestResult.ok) {
     return []
+  }
+
+  const validationEnv = {
+    ...env,
+    backend: effectiveBackend,
+    dbPath,
+    manifestPath: resolvedManifestPath,
   }
 
   const validation = validateManifestForSource(
     manifestResult.manifest,
     OPENCODE_SOURCE,
-    env,
+    validationEnv,
   )
   if (!validation.valid) {
     return []
@@ -138,7 +146,7 @@ export async function queryVectorAdapter(
 
   const embeddingClient = createHttpEmbeddingClient(env)
   const vectorStore = createLanceDbVectorStore({
-    dbPath: env.dbPath,
+    dbPath,
     tableName: sourceEntry.table,
   })
 
