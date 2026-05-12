@@ -46,7 +46,7 @@ Of course! Let me help you with...`
 
 export const SESSION_SEARCH_DESCRIPTION = `Search for content within OpenCode session messages.
 
-Performs read-only SQLite keyword search against OpenCode's session database, then optionally augments results with semantic matches from a derived Search Note vector index when that adapter is configured. Missing or failing vector search is non-fatal; SQL and vector results are merged, deduplicated by session/message, and tagged by source.
+Performs read-only SQLite keyword search against OpenCode's session database, then optionally augments results with semantic matches from an internal derived vector index when one has been built and configured. Missing or failing vector search is non-fatal; SQL and vector results are merged, deduplicated by session/message, and tagged by source.
 
 Arguments:
 - query (required): Search query string

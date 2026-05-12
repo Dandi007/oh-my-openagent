@@ -1,90 +1,30 @@
-import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import type { SearchResult } from "./types"
+import { resolveVectorRuntimeEnv } from "../../shared/vector-runtime/env"
+import {
+  resolveManifestPath,
+  loadManifest,
+  validateManifestForSource,
+} from "../../shared/vector-runtime/manifest"
+import {
+  createHttpEmbeddingClient,
+  type EmbeddingClient,
+} from "../../shared/vector-runtime/embedding-client"
+import {
+  createLanceDbVectorStore,
+  type LanceDbVectorStore,
+} from "../../shared/vector-runtime/lancedb-adapter"
+import type { QueryResult } from "../../shared/vector-runtime/types"
+
+const OPENCODE_SOURCE = "opencode"
 
 interface VectorAdapterOptions {
-  adapterPath?: string
   topK?: number
   sessionId?: string
-  spawnOverride?: typeof import("node:child_process").execFile
   timeoutMs?: number
-}
-
-interface VectorResultItem {
-  path?: string
-  session_id?: string
-  message_id?: string
-  title?: string
-  score?: number
-  match_type?: string[]
-  snippet?: string
-  source_type?: string
-  heading_path?: string
-  chunk_text?: string
-  mtime?: string
-  absolute_path?: string
-}
-
-function isVectorResultItem(input: unknown): input is VectorResultItem {
-  if (typeof input !== "object" || input === null) return false
-  const obj = input as Record<string, unknown>
-  return typeof obj.session_id === "string" || typeof obj.path === "string"
-}
-
-function isValidSessionItem(item: VectorResultItem): boolean {
-  const sid = item.session_id
-  if (typeof sid !== "string" || sid.length === 0) return false
-  if (typeof item.source_type === "string" && item.source_type !== "opencode_session") return false
-  return true
-}
-
-function isVectorResultArray(input: unknown): input is VectorResultItem[] {
-  return Array.isArray(input) && input.every(isVectorResultItem)
-}
-
-interface VectorOutputShape {
-  results?: unknown
-}
-
-function isVectorOutput(input: unknown): input is VectorOutputShape {
-  return typeof input === "object" && input !== null && "results" in input
-}
-
-function getDefaultAdapterPath(): string {
-  const configured = process.env.OMO_SESSION_SEARCH_VECTOR_ADAPTER?.trim()
-  if (configured) return configured
-
-  const candidates = [
-    join(
-      process.env.HOME || "",
-      "Library",
-      "Mobile Documents",
-      "iCloud~md~obsidian",
-      "Documents",
-      "Zettelkasten",
-      ".agents",
-      "skills",
-      "search-note",
-      "scripts",
-      "query_lancedb.py",
-    ),
-    join(
-      process.env.HOME || "",
-      "Documents",
-      "Zettelkasten",
-      ".agents",
-      "skills",
-      "search-note",
-      "scripts",
-      "query_lancedb.py",
-    ),
-  ]
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate
-  }
-  return candidates[0]
+  _env?: Record<string, string | undefined>
+  _embeddingClient?: EmbeddingClient
+  _vectorStore?: LanceDbVectorStore
 }
 
 function deterministicSuffix(input: string): string {
@@ -98,117 +38,166 @@ function deterministicSuffix(input: string): string {
   return abs.toString(36).slice(0, 8)
 }
 
-function normalizeVectorScore(score: unknown): number {
-  if (typeof score !== "number" || !Number.isFinite(score)) return 0.5
-  if (score < 0) return 0
-  return 1 / (1 + score)
-}
+function queryResultToSearchResult(item: QueryResult): SearchResult {
+  const meta = item.metadata
+  const sessionID = typeof meta.session_id === "string" ? meta.session_id : ""
+  const messageID = typeof meta.message_id === "string" ? meta.message_id : ""
+  const role = typeof meta.role === "string" ? meta.role : "unknown"
+  const title = typeof meta.session_title === "string" ? meta.session_title : ""
+  const messageTimeCreated =
+    typeof meta.message_time_created === "number" ? meta.message_time_created : undefined
 
-function noSourceDBPath(): string {
-  const suffix = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  return join(tmpdir(), `omo-session-search-no-source-opencode-${suffix}.db`)
-}
-
-function vectorItemToSearchResult(item: VectorResultItem): SearchResult {
-  const role = (item.heading_path || "").replace("message/", "") || "unknown"
-  const sessionID = item.session_id as string
-  const snippetRaw = item.snippet || item.chunk_text || ""
-
-  const stableSeed = [sessionID, item.path || "", snippetRaw.slice(0, 50), role].join(":")
+  const stableSeed = [sessionID, item.chunk_id, item.text.slice(0, 50), role].join(":")
   const suffix = deterministicSuffix(stableSeed)
-  const messageID = item.message_id || `${sessionID}_vec_${suffix}`
+  const resolvedMessageID = messageID || `${sessionID}_vec_${suffix}`
 
   return {
     session_id: sessionID,
-    message_id: messageID,
+    message_id: resolvedMessageID,
     role,
-    excerpt: snippetRaw,
+    excerpt: item.text,
     match_count: 1,
-    timestamp: undefined,
-    match_type: item.match_type || ["semantic"],
+    timestamp: messageTimeCreated,
+    match_type: ["semantic"],
     source: "vector",
-    title: item.title || "",
-    score: normalizeVectorScore(item.score),
+    title,
+    score: item.score,
   }
+}
+
+function buildEnvInput(
+  baseEnv: Record<string, string | undefined> | undefined,
+  timeoutMs: number | undefined,
+): Record<string, string | undefined> | undefined {
+  if (timeoutMs === undefined) return baseEnv
+  const merged: Record<string, string | undefined> = {
+    ...(baseEnv ?? (typeof process !== "undefined" ? process.env as Record<string, string | undefined> : {})),
+  }
+  merged["AGENT_VECTOR_TIMEOUT_MS"] = String(timeoutMs)
+  return merged
 }
 
 export async function queryVectorAdapter(
   query: string,
   options: VectorAdapterOptions = {},
 ): Promise<SearchResult[]> {
-  const adapterPath = options.adapterPath ?? getDefaultAdapterPath()
+  const topK = options.topK ?? 10
 
-  if (!existsSync(adapterPath)) {
+  if (options._embeddingClient !== undefined && options._vectorStore !== undefined) {
+    return runVectorQuery(
+      query,
+      topK,
+      options.sessionId,
+      options._embeddingClient,
+      options._vectorStore,
+    )
+  }
+
+  const envInput = buildEnvInput(options._env, options.timeoutMs)
+  const { env } = resolveVectorRuntimeEnv(envInput)
+
+  if (env.backend !== "lancedb") {
     return []
   }
 
-  const args = [
-    adapterPath,
-    query,
-    "--source",
-    "opencode",
-    "--mode",
-    "semantic",
-    "--top-k",
-    String(options.topK ?? 10),
-    "--opencode-db",
-    noSourceDBPath(),
-  ]
+  if (!env.dbPath) {
+    return []
+  }
 
-  const cmd = "python3"
-  const timeoutMs = options.timeoutMs ?? 15000
-  const spawnFn = options.spawnOverride ?? execFile
+  if (!env.embedding.endpoint) {
+    return []
+  }
 
-  return new Promise<SearchResult[]>((resolve) => {
-    const timeout = setTimeout(() => {
-      resolve([])
-    }, timeoutMs)
+  if (!existsSync(env.dbPath)) {
+    return []
+  }
 
-    spawnFn(cmd, args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, _stderr) => {
-      clearTimeout(timeout)
+  const manifestPath = resolveManifestPath(env)
+  if (!manifestPath) {
+    return []
+  }
 
-      if (error) {
-        resolve([])
-        return
-      }
+  const manifestResult = await loadManifest(manifestPath)
+  if (!manifestResult.ok) {
+    return []
+  }
 
-      if (!stdout || stdout.trim().length === 0) {
-        resolve([])
-        return
-      }
+  const validation = validateManifestForSource(
+    manifestResult.manifest,
+    OPENCODE_SOURCE,
+    env,
+  )
+  if (!validation.valid) {
+    return []
+  }
 
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(stdout)
-      } catch {
-        resolve([])
-        return
-      }
+  const sourceEntry = manifestResult.manifest.sources[OPENCODE_SOURCE]
+  if (!sourceEntry) {
+    return []
+  }
 
-      const results: VectorResultItem[] = []
-      if (isVectorOutput(parsed) && isVectorResultArray(parsed.results)) {
-        results.push(...parsed.results)
-      } else if (isVectorResultArray(parsed)) {
-        results.push(...parsed)
-      } else {
-        resolve([])
-        return
-      }
-
-      const seen = new Set<string>()
-      const output: SearchResult[] = []
-      for (const item of results) {
-        if (!isValidSessionItem(item)) continue
-        const sessionID = item.session_id as string
-        if (options.sessionId !== undefined && sessionID !== options.sessionId) continue
-        const result = vectorItemToSearchResult(item)
-        const key = `${result.session_id}:${result.message_id}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        output.push(result)
-      }
-
-      resolve(output)
-    })
+  const embeddingClient = createHttpEmbeddingClient(env)
+  const vectorStore = createLanceDbVectorStore({
+    dbPath: env.dbPath,
+    tableName: sourceEntry.table,
   })
+
+  return runVectorQuery(query, topK, options.sessionId, embeddingClient, vectorStore)
+}
+
+async function runVectorQuery(
+  query: string,
+  topK: number,
+  sessionId: string | undefined,
+  embeddingClient: EmbeddingClient,
+  vectorStore: LanceDbVectorStore,
+): Promise<SearchResult[]> {
+  let embedding: number[][]
+  try {
+    embedding = await embeddingClient.embed([query])
+  } catch {
+    return []
+  }
+
+  if (embedding.length === 0) {
+    return []
+  }
+
+  let response
+  try {
+    response = await vectorStore.query(
+      {
+        query,
+        source: OPENCODE_SOURCE,
+        mode: "semantic",
+        top_k: topK,
+      },
+      embedding[0],
+      { manifestValidated: true },
+    )
+  } catch {
+    return []
+  }
+
+  const seen = new Set<string>()
+  const output: SearchResult[] = []
+
+  for (const item of response.results) {
+    if (item.source !== OPENCODE_SOURCE) continue
+
+    const meta = item.metadata
+    const itemSessionID =
+      typeof meta.session_id === "string" ? meta.session_id : ""
+    if (!itemSessionID) continue
+
+    if (sessionId !== undefined && itemSessionID !== sessionId) continue
+
+    const result = queryResultToSearchResult(item)
+    const key = `${result.session_id}:${result.message_id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    output.push(result)
+  }
+
+  return output
 }

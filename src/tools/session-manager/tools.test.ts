@@ -1,10 +1,43 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, beforeAll, afterAll } from "bun:test"
 import { Database } from "bun:sqlite"
-import { existsSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { session_list, session_read, session_search, session_info } from "./tools"
 import type { ToolContext } from "@opencode-ai/plugin/tool"
+import { createLanceDbVectorStore } from "../../shared/vector-runtime/lancedb-adapter"
+
+// Snapshot the real fetch at module-load time so the embedding server
+// works even when other test files leave globalThis.fetch mocked.
+const _realFetch = globalThis.fetch
+
+const FIXED_VECTOR = [0.1, 0.2, 0.3, 0.4]
+
+let embeddingServer: ReturnType<typeof Bun.serve> | null = null
+let embeddingEndpoint = ""
+
+beforeAll(() => {
+  embeddingServer = Bun.serve({
+    port: 0,
+    fetch(_req) {
+      return new Response(
+        JSON.stringify({
+          data: [{ embedding: FIXED_VECTOR, index: 0 }],
+          model: "test-model",
+          usage: { prompt_tokens: 1, total_tokens: 1 },
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      )
+    },
+  })
+  embeddingEndpoint = `http://localhost:${embeddingServer.port}/v1/embeddings`
+})
+
+afterAll(() => {
+  if (embeddingServer) {
+    embeddingServer.stop()
+  }
+})
 
 const mockContext: ToolContext = {
   sessionID: "test-session",
@@ -43,25 +76,73 @@ function createSearchDB(): string {
   return dbPath
 }
 
-function createVectorAdapter(sessionID = "ses_vector"): string {
-  const adapterPath = join(tmpdir(), `omo-tools-vector-${Date.now()}-${Math.random().toString(36).slice(2)}.py`)
-  const payload = {
-    results: [
-      {
-        path: `opencode://${sessionID}`,
+interface VectorBackendFixture {
+  env: Record<string, string>
+  cleanup: () => void
+}
+
+async function setupVectorBackend(sessionID: string): Promise<VectorBackendFixture> {
+  const tmpDir = join(tmpdir(), `omo-tools-vector-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  mkdirSync(tmpDir, { recursive: true })
+
+  const dbPath = join(tmpDir, "lancedb")
+  const manifestPath = join(tmpDir, "manifest.json")
+
+  const manifest = {
+    contract_version: "vector-runtime/v1",
+    backend: "lancedb",
+    db_path: dbPath,
+    embedding: {
+      provider: "http",
+      endpoint: embeddingEndpoint,
+      model: "test-model",
+      dimensions: 4,
+    },
+    sources: {
+      opencode: {
+        table: "opencode_sessions",
+        schema_version: "opencode-session-chunk/v1",
+        source_of_truth: "database",
+        last_indexed_at: new Date().toISOString(),
+      },
+    },
+  }
+  writeFileSync(manifestPath, JSON.stringify(manifest))
+
+  const store = createLanceDbVectorStore({ dbPath, tableName: "opencode_sessions" })
+  await store.upsertChunks([
+    {
+      source: "opencode",
+      chunk_id: `opencode:${sessionID}:msg_vector:prt_vector:hash_vector`,
+      text: "needle from vector backend",
+      metadata: {
         session_id: sessionID,
         message_id: "msg_vector",
-        title: "Vector Session",
-        score: 0.2,
-        match_type: ["semantic"],
-        snippet: "needle from vector backend",
-        source_type: "opencode_session",
-        heading_path: "message/assistant",
+        role: "assistant",
+        session_title: "Vector Session",
+        session_time_created: Date.now(),
+        message_time_created: Date.now(),
       },
-    ],
+      schema_version: "opencode-session-chunk/v1",
+      chunk_hash: "hash_vector",
+      embedding: FIXED_VECTOR,
+      updated_at: new Date().toISOString(),
+    },
+  ])
+
+  return {
+    env: {
+      AGENT_VECTOR_DB_BACKEND: "lancedb",
+      AGENT_VECTOR_DB_PATH: dbPath,
+      AGENT_VECTOR_MANIFEST: manifestPath,
+      AGENT_EMBEDDING_ENDPOINT: embeddingEndpoint,
+      AGENT_EMBEDDING_MODEL: "test-model",
+      AGENT_EMBEDDING_DIMENSIONS: "4",
+    },
+    cleanup: () => {
+      rmSync(tmpDir, { recursive: true, force: true })
+    },
   }
-  writeFileSync(adapterPath, `#!/usr/bin/env python3\nimport json\nprint(${JSON.stringify(JSON.stringify(payload))})\n`)
-  return adapterPath
 }
 
 function removeIfExists(path: string): void {
@@ -170,22 +251,15 @@ describe("session-manager tools", () => {
   })
 
   test("session_search returns no matches for empty query before calling adapters", async () => {
-    const adapterPath = createVectorAdapter("ses_vector_empty")
-    try {
-      await withEnv({ OPENCODE_DB: "/missing/opencode.db", OMO_SESSION_SEARCH_VECTOR_ADAPTER: adapterPath }, async () => {
-        const result = await session_search.execute({ query: "   ", limit: 5 }, mockContext)
+    const result = await session_search.execute({ query: "   ", limit: 5 }, mockContext)
 
-        expect(result).toBe("No matches found.")
-      })
-    } finally {
-      removeIfExists(adapterPath)
-    }
+    expect(result).toBe("No matches found.")
   })
 
   test("session_search uses SQL backend when vector adapter is absent", async () => {
     const dbPath = createSearchDB()
     try {
-      await withEnv({ OPENCODE_DB: dbPath, OMO_SESSION_SEARCH_VECTOR_ADAPTER: "/missing/query_lancedb.py" }, async () => {
+      await withEnv({ OPENCODE_DB: dbPath }, async () => {
         const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
 
         expect(result).toContain("SQL Session")
@@ -197,13 +271,15 @@ describe("session-manager tools", () => {
   })
 
   test("session_search falls back to vector backend when SQL schema is unavailable", async () => {
+    // Restore real fetch in case another test file left it mocked
+    if (typeof _realFetch === "function") globalThis.fetch = _realFetch
     const dbPath = join(tmpdir(), `omo-tools-bad-schema-${Date.now()}.db`)
     const db = new Database(dbPath)
     db.run("CREATE TABLE unrelated (id TEXT)")
     db.close()
-    const adapterPath = createVectorAdapter()
+    const fixture = await setupVectorBackend("ses_vector")
     try {
-      await withEnv({ OPENCODE_DB: dbPath, OMO_SESSION_SEARCH_VECTOR_ADAPTER: adapterPath }, async () => {
+      await withEnv({ ...fixture.env, OPENCODE_DB: dbPath }, async () => {
         const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
 
         expect(result).toContain("Vector Session")
@@ -212,20 +288,20 @@ describe("session-manager tools", () => {
       })
     } finally {
       removeIfExists(dbPath)
-      removeIfExists(adapterPath)
+      fixture.cleanup()
     }
   })
 
   test("session_search applies session_id filter to vector results", async () => {
-    const adapterPath = createVectorAdapter("ses_target")
+    const fixture = await setupVectorBackend("ses_target")
     try {
-      await withEnv({ OPENCODE_DB: "/missing/opencode.db", OMO_SESSION_SEARCH_VECTOR_ADAPTER: adapterPath }, async () => {
+      await withEnv({ ...fixture.env, OPENCODE_DB: "/missing/opencode.db" }, async () => {
         const result = await session_search.execute({ query: "needle", session_id: "ses_other", limit: 5 }, mockContext)
 
         expect(result).toBe("No matches found.")
       })
     } finally {
-      removeIfExists(adapterPath)
+      fixture.cleanup()
     }
   })
 
