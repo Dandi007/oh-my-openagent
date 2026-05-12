@@ -50,16 +50,17 @@ function invalidRequestDiagnostics(backend: VectorBackend): RuntimeDiagnostics {
   }
 }
 
-function emptyQueryResponse(diagnostics: RuntimeDiagnostics): QueryResponse {
-  return { results: [], diagnostics }
+function manifestInvalidDiagnostics(backend: VectorBackend): RuntimeDiagnostics {
+  return {
+    backend,
+    manifest_validated: true,
+    semantic_available: false,
+    reason: "manifest_invalid",
+  }
 }
 
-function noManifestValidationResult(): ManifestValidationResult {
-  return {
-    valid: false,
-    errors: ["no manifest provided"],
-    warnings: [],
-  }
+function emptyQueryResponse(diagnostics: RuntimeDiagnostics): QueryResponse {
+  return { results: [], diagnostics }
 }
 
 function noopValidationResult(): ManifestValidationResult {
@@ -72,26 +73,38 @@ function noopValidationResult(): ManifestValidationResult {
 
 function buildValidate(
   manifest: ManifestContract | undefined,
-  source: string | undefined,
+  env?: ResolvedVectorRuntimeEnv,
 ): () => Promise<ManifestValidationResult> {
   if (!manifest) {
     return async () => noopValidationResult()
   }
-  const targetSource = source || "all"
-  return async () => validateManifestForSource(manifest, targetSource)
+  return async () => validateManifestForSource(manifest, "all", env)
 }
 
 function buildQuery(
   diagnostics: RuntimeDiagnostics,
   manifest: ManifestContract | undefined,
-  source: string | undefined,
+  env?: ResolvedVectorRuntimeEnv,
 ): (request: QueryRequest) => Promise<QueryResponse> {
   return async (request: QueryRequest): Promise<QueryResponse> => {
     const parsed = QueryRequestSchema.safeParse(request)
     if (!parsed.success) {
       return emptyQueryResponse(invalidRequestDiagnostics(diagnostics.backend))
     }
-    return emptyQueryResponse(diagnostics)
+
+    if (!manifest) {
+      return emptyQueryResponse(diagnostics)
+    }
+
+    const validation = validateManifestForSource(manifest, request.source, env)
+    if (!validation.valid) {
+      return emptyQueryResponse(manifestInvalidDiagnostics(diagnostics.backend))
+    }
+
+    return emptyQueryResponse({
+      ...diagnostics,
+      manifest_validated: true,
+    })
   }
 }
 
@@ -102,11 +115,11 @@ function buildDiagnostics(d: RuntimeDiagnostics): () => RuntimeDiagnostics {
 function makeQueryRuntime(
   diagnostics: RuntimeDiagnostics,
   manifest?: ManifestContract,
-  source?: string,
+  env?: ResolvedVectorRuntimeEnv,
 ): QueryRuntime {
   return {
-    validate: buildValidate(manifest, source),
-    query: buildQuery(diagnostics, manifest, source),
+    validate: buildValidate(manifest, env),
+    query: buildQuery(diagnostics, manifest, env),
     diagnostics: buildDiagnostics(diagnostics),
   }
 }
@@ -142,7 +155,7 @@ export function createRuntimeAdapter(
     return makeQueryRuntime(
       notImplementedDiagnostics(manifest.backend),
       manifest,
-      env.source,
+      env,
     )
   }
 

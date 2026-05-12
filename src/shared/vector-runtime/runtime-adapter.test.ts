@@ -35,7 +35,7 @@ function makeManifest(overrides?: Partial<ManifestContract>): ManifestContract {
       opencode: {
         table: "opencode_sessions",
         schema_version: "opencode-session-chunk/v1",
-        source_of_truth: "opencode.db",
+        source_of_truth: "database",
         last_indexed_at: new Date().toISOString(),
       },
     },
@@ -270,10 +270,10 @@ describe("createRuntimeAdapter", () => {
       expect(diag.reason).toBe("backend_not_implemented_in_current_refactor")
     })
 
-    // #given a lancedb-routed adapter
-    // #when query() is called with a valid request
-    // #then it returns empty results with not-implemented diagnostics
-    it("returns empty results for valid query on lancedb route", async () => {
+    // #given a lancedb-routed adapter with valid manifest
+    // #when query() is called with a valid request whose source exists in manifest
+    // #then it validates manifest, returns empty results with manifest_validated=true
+    it("validates manifest and returns not-implemented with manifest_validated=true", async () => {
       const env = makeEnv({ backend: "lancedb" })
       const manifest = makeManifest({ backend: "lancedb" })
       const adapter = createRuntimeAdapter(env, manifest)
@@ -282,30 +282,53 @@ describe("createRuntimeAdapter", () => {
       expect(response.diagnostics.reason).toBe(
         "backend_not_implemented_in_current_refactor",
       )
+      expect(response.diagnostics.manifest_validated).toBe(true)
+      expect(response.diagnostics.semantic_available).toBe(false)
+    })
+
+    // #given a lancedb-routed adapter with valid manifest
+    // #when query() is called with a source NOT in the manifest
+    // #then it returns manifest_invalid reason
+    it("returns manifest_invalid when query source is missing from manifest", async () => {
+      const env = makeEnv({ backend: "lancedb" })
+      const manifest = makeManifest({ backend: "lancedb" })
+      const adapter = createRuntimeAdapter(env, manifest)
+      const response = await adapter.query(
+        validQueryRequest({ source: "markdown" }),
+      )
+      expect(response.results).toEqual([])
+      expect(response.diagnostics.semantic_available).toBe(false)
+      expect(response.diagnostics.reason).toBe("manifest_invalid")
+    })
+
+    // #given a lancedb-routed adapter with valid manifest
+    // #when query() is called with an invalid request (empty query)
+    // #then it returns invalid_query_request BEFORE manifest validation
+    it("returns invalid_query_request before manifest validation for invalid request", async () => {
+      const env = makeEnv({ backend: "lancedb" })
+      const manifest = makeManifest({ backend: "lancedb" })
+      const adapter = createRuntimeAdapter(env, manifest)
+      const response = await adapter.query({
+        query: "",
+        source: "opencode",
+        mode: "semantic",
+        top_k: 10,
+      })
+      expect(response.results).toEqual([])
+      expect(response.diagnostics.reason).toBe("invalid_query_request")
+      expect(response.diagnostics.manifest_validated).toBe(false)
     })
 
     // #given a lancedb-routed adapter
     // #when validate() is called
-    // #then it validates the manifest for the source
-    it("validates manifest for source on lancedb route", async () => {
-      const env = makeEnv({ backend: "lancedb", source: "opencode" })
+    // #then it validates the manifest for "all" sources
+    it("validate() checks manifest for all sources on lancedb route", async () => {
+      const env = makeEnv({ backend: "lancedb" })
       const manifest = makeManifest({ backend: "lancedb" })
       const adapter = createRuntimeAdapter(env, manifest)
       const result = await adapter.validate()
       expect(result.valid).toBe(true)
       expect(result.errors).toEqual([])
-    })
-
-    // #given a lancedb-routed adapter with a missing source in manifest
-    // #when validate() is called
-    // #then it returns invalid with source-not-found error
-    it("returns invalid when source is missing from manifest", async () => {
-      const env = makeEnv({ backend: "lancedb", source: "markdown" })
-      const manifest = makeManifest({ backend: "lancedb" })
-      const adapter = createRuntimeAdapter(env, manifest)
-      const result = await adapter.validate()
-      expect(result.valid).toBe(false)
-      expect(result.errors.some((e) => e.includes("markdown"))).toBe(true)
     })
   })
 
@@ -323,10 +346,10 @@ describe("createRuntimeAdapter", () => {
       expect(diag.reason).toBe("backend_not_implemented_in_current_refactor")
     })
 
-    // #given a qdrant-routed adapter
+    // #given a qdrant-routed adapter with valid manifest
     // #when query() is called with a valid request
-    // #then it returns empty results with not-implemented diagnostics
-    it("returns empty results for valid query on qdrant route", async () => {
+    // #then it validates manifest and returns not-implemented with manifest_validated=true
+    it("validates manifest and returns not-implemented with manifest_validated=true", async () => {
       const env = makeEnv({ backend: "qdrant" })
       const manifest = makeManifest({ backend: "qdrant" })
       const adapter = createRuntimeAdapter(env, manifest)
@@ -335,6 +358,62 @@ describe("createRuntimeAdapter", () => {
       expect(response.diagnostics.reason).toBe(
         "backend_not_implemented_in_current_refactor",
       )
+      expect(response.diagnostics.manifest_validated).toBe(true)
+      expect(response.diagnostics.semantic_available).toBe(false)
+    })
+  })
+
+  describe("backend mismatch between env and manifest", () => {
+    // #given env.backend="qdrant" and manifest.backend="lancedb"
+    // #when validate() is called
+    // #then it returns valid=false with backend mismatch error
+    it("validate() detects backend mismatch and returns valid=false", async () => {
+      const env = makeEnv({ backend: "qdrant" })
+      const manifest = makeManifest({ backend: "lancedb" })
+      const adapter = createRuntimeAdapter(env, manifest)
+      const result = await adapter.validate()
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("does not match resolved backend"))).toBe(true)
+    })
+
+    // #given env.backend="qdrant" and manifest.backend="lancedb"
+    // #when query() is called with a valid request
+    // #then it returns manifest_invalid with semantic_available=false
+    it("query() returns manifest_invalid when backends differ", async () => {
+      const env = makeEnv({ backend: "qdrant" })
+      const manifest = makeManifest({ backend: "lancedb" })
+      const adapter = createRuntimeAdapter(env, manifest)
+      const response = await adapter.query(validQueryRequest())
+      expect(response.results).toEqual([])
+      expect(response.diagnostics.reason).toBe("manifest_invalid")
+      expect(response.diagnostics.semantic_available).toBe(false)
+      expect(response.diagnostics.manifest_validated).toBe(true)
+    })
+
+    // #given env.backend="lancedb" and manifest.backend="qdrant"
+    // #when validate() is called
+    // #then it returns valid=false with backend mismatch error
+    it("validate() detects reverse backend mismatch (lancedb env vs qdrant manifest)", async () => {
+      const env = makeEnv({ backend: "lancedb" })
+      const manifest = makeManifest({ backend: "qdrant" })
+      const adapter = createRuntimeAdapter(env, manifest)
+      const result = await adapter.validate()
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("does not match resolved backend"))).toBe(true)
+    })
+
+    // #given env.backend="lancedb" and manifest.backend="qdrant"
+    // #when query() is called with a valid request
+    // #then it returns manifest_invalid with semantic_available=false
+    it("query() returns manifest_invalid for reverse backend mismatch", async () => {
+      const env = makeEnv({ backend: "lancedb" })
+      const manifest = makeManifest({ backend: "qdrant" })
+      const adapter = createRuntimeAdapter(env, manifest)
+      const response = await adapter.query(validQueryRequest())
+      expect(response.results).toEqual([])
+      expect(response.diagnostics.reason).toBe("manifest_invalid")
+      expect(response.diagnostics.semantic_available).toBe(false)
+      expect(response.diagnostics.manifest_validated).toBe(true)
     })
   })
 
