@@ -21,7 +21,7 @@ const positiveIntSchema = z.number().int().positive()
 export const ManifestSourceSchema = z.object({
   table: z.string().min(1),
   schema_version: z.string().min(1),
-  source_of_truth: z.string().min(1),
+  source_of_truth: z.enum(["database", "external-system"]),
   last_indexed_at: z.string().min(1),
 }).strict()
 

@@ -12,14 +12,14 @@ import {
 const validManifestSource = {
   table: "opencode_sessions",
   schema_version: "opencode-session-chunk/v1",
-  source_of_truth: "opencode.db",
+  source_of_truth: "database",
   last_indexed_at: "2026-05-12T00:00:00+08:00",
 }
 
 const validManifest = {
   contract_version: "vector-runtime/v1" as const,
   backend: "lancedb" as const,
-  db_path: "~/.cache/agent-knowledge/Zettelkasten/lancedb",
+  db_path: "/vector-store",
   embedding: {
     provider: "http",
     endpoint: "http://example.internal/v1/embeddings",
@@ -31,7 +31,7 @@ const validManifest = {
     markdown: {
       table: "chunks",
       schema_version: "markdown-chunk/v1",
-      source_of_truth: "filesystem",
+      source_of_truth: "external-system",
       last_indexed_at: "2026-05-12T00:00:00+08:00",
     },
   },
@@ -132,6 +132,39 @@ describe("ManifestSourceSchema", () => {
       extra_field: "should not be here",
     })
     expect(result.success).toBe(false)
+  })
+
+  // #given a source entry with source_of_truth not in approved enum
+  // #when parsed by ManifestSourceSchema
+  // #then it fails
+  it("rejects source_of_truth not in approved enum", () => {
+    const result = ManifestSourceSchema.safeParse({
+      ...validManifestSource,
+      source_of_truth: "filesystem",
+    })
+    expect(result.success).toBe(false)
+  })
+
+  // #given a source entry with source_of_truth "opencode.db"
+  // #when parsed by ManifestSourceSchema
+  // #then it fails (not in approved enum)
+  it("rejects source_of_truth with consumer-specific value", () => {
+    const result = ManifestSourceSchema.safeParse({
+      ...validManifestSource,
+      source_of_truth: "opencode.db",
+    })
+    expect(result.success).toBe(false)
+  })
+
+  // #given a source entry with source_of_truth "external-system"
+  // #when parsed by ManifestSourceSchema
+  // #then it succeeds
+  it("accepts source_of_truth external-system", () => {
+    const result = ManifestSourceSchema.safeParse({
+      ...validManifestSource,
+      source_of_truth: "external-system",
+    })
+    expect(result.success).toBe(true)
   })
 })
 
