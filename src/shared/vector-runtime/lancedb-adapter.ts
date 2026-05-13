@@ -98,13 +98,11 @@ function chunkIdList(chunkIds: string[]): string {
   return chunkIds.map(quoteSqlString).join(", ")
 }
 
-function deleteExistingFilter(chunks: LanceDbChunkInput[]): string {
-  const first = chunks[0]
-  if (!first) {
+function deleteExistingFilter(source: SourceNamespace, chunkIds: string[]): string {
+  if (chunkIds.length === 0) {
     return ""
   }
-  const ids = chunks.map((c) => c.chunk_id)
-  return `${sourceFilter(first.source)} AND chunk_id IN (${chunkIdList(ids)})`
+  return `${sourceFilter(source)} AND chunk_id IN (${chunkIdList(chunkIds)})`
 }
 
 function chunksBySource(chunks: LanceDbChunkInput[]): Map<SourceNamespace, string[]> {
@@ -228,20 +226,7 @@ export function createLanceDbVectorStore(
 
       const table = existing
       for (const [source, chunkIds] of chunksBySource(chunks)) {
-        await table.delete(
-          deleteExistingFilter(
-            chunkIds.map((chunk_id) => ({
-              source,
-              chunk_id,
-              text: "",
-              metadata: {},
-              schema_version: "",
-              chunk_hash: "",
-              embedding: [],
-              updated_at: "",
-            })),
-          ),
-        )
+        await table.delete(deleteExistingFilter(source, chunkIds))
       }
       await table.add(rows)
     },
