@@ -4,10 +4,10 @@ import {
   formatDurationHuman,
   getPlanProgress,
   getWorkForSession,
-  getTaskSessionState,
+  getTaskSessionStateForWork,
   readBoulderState,
   readCurrentTopLevelTask,
-  resolveBoulderPlanPath,
+  resolveBoulderPlanPathForWork,
 } from "../../features/boulder-state"
 import {
   getSessionAgent,
@@ -67,33 +67,28 @@ async function injectContinuation(input: {
   input.sessionState.isInjectingContinuation = true
 
   try {
-    const currentBoulder = readBoulderState(input.ctx.directory)
-    const currentPlanPath = currentBoulder
-      ? resolveBoulderPlanPath(input.ctx.directory, currentBoulder)
-      : null
-    const currentTask = currentBoulder
-      && currentPlanPath
-      ? readCurrentTopLevelTask(currentPlanPath)
-      : null
-    const preferredTaskSession = currentTask
-      ? getTaskSessionState(input.ctx.directory, currentTask.key)
-      : null
-
-    if (!currentBoulder) {
+    const currentWork = getWorkForSession(input.ctx.directory, input.sessionID)
+    if (!currentWork) {
       return
     }
+
+    const currentPlanPath = resolveBoulderPlanPathForWork(input.ctx.directory, currentWork)
+    const currentTask = readCurrentTopLevelTask(currentPlanPath)
+    const preferredTaskSession = currentTask
+      ? getTaskSessionStateForWork(input.ctx.directory, currentWork.work_id, currentTask.key)
+      : null
 
     const canContinueSession = await canContinueTrackedBoulderSession({
       client: input.ctx.client,
       sessionID: input.sessionID,
-      sessionOrigin: currentBoulder.session_origins?.[input.sessionID],
-      boulderSessionIDs: currentBoulder.session_ids,
-      requiredAgent: currentBoulder.agent,
+      sessionOrigin: currentWork.session_origins?.[input.sessionID],
+      boulderSessionIDs: currentWork.session_ids,
+      requiredAgent: currentWork.agent,
     })
     if (!canContinueSession) {
       log(`[${HOOK_NAME}] Skipped: tracked descendant agent does not match boulder agent`, {
         sessionID: input.sessionID,
-        requiredAgent: currentBoulder.agent ?? "atlas",
+        requiredAgent: currentWork.agent ?? "atlas",
       })
       return
     }
@@ -179,19 +174,19 @@ function scheduleRetry(input: {
       return
     }
 
-    const currentBoulder = readBoulderState(ctx.directory)
-    if (!currentBoulder) return
-    if (!currentBoulder.session_ids?.includes(sessionID)) return
+    const currentWork = getWorkForSession(ctx.directory, sessionID)
+    if (!currentWork) return
+    if (!currentWork.session_ids.includes(sessionID)) return
 
-    const currentProgress = getPlanProgress(resolveBoulderPlanPath(ctx.directory, currentBoulder))
+    const currentProgress = getPlanProgress(resolveBoulderPlanPathForWork(ctx.directory, currentWork))
     if (currentProgress.isComplete) return
     if (options?.isContinuationStopped?.(sessionID)) return
     const canContinueSession = await canContinueTrackedBoulderSession({
       client: ctx.client,
       sessionID,
-      sessionOrigin: currentBoulder.session_origins?.[sessionID],
-      boulderSessionIDs: currentBoulder.session_ids,
-      requiredAgent: currentBoulder.agent,
+      sessionOrigin: currentWork.session_origins?.[sessionID],
+      boulderSessionIDs: currentWork.session_ids,
+      requiredAgent: currentWork.agent,
     })
     if (!canContinueSession) return
     if (hasRunningBackgroundTasks(sessionID, options)) {
@@ -204,10 +199,10 @@ function scheduleRetry(input: {
       sessionID,
       sessionState,
       options,
-      planName: currentBoulder.plan_name,
+      planName: currentWork.plan_name,
       progress: currentProgress,
-      agent: currentBoulder.agent,
-      worktreePath: currentBoulder.worktree_path,
+      agent: currentWork.agent,
+      worktreePath: currentWork.worktree_path,
     })
   }, RETRY_DELAY_MS)
 }
@@ -233,22 +228,17 @@ export async function handleAtlasSessionIdle(input: {
     return
   }
 
-  const { boulderState, progress, appendedSession } = activeBoulderSession
+  const { work, progress, appendedSession } = activeBoulderSession
   if (progress.isComplete) {
-    const work = getWorkForSession(ctx.directory, sessionID)
-    if (work) {
-      completeBoulder(ctx.directory, work.work_id)
-    } else {
-      completeBoulder(ctx.directory, boulderState.active_work_id)
-    }
+    completeBoulder(ctx.directory, work.work_id)
 
-    if (!work || work.status === "abandoned") {
-      log(`[${HOOK_NAME}] Boulder complete`, { sessionID, plan: boulderState.plan_name })
+    if (work.status === "abandoned") {
+      log(`[${HOOK_NAME}] Boulder complete`, { sessionID, plan: work.plan_name })
       return
     }
 
     if (sessionState.boulderCompletionNudgedAt?.[work.work_id]) {
-      log(`[${HOOK_NAME}] Boulder complete`, { sessionID, plan: boulderState.plan_name })
+      log(`[${HOOK_NAME}] Boulder complete`, { sessionID, plan: work.plan_name })
       return
     }
 
@@ -280,7 +270,7 @@ export async function handleAtlasSessionIdle(input: {
       .replace(/{TASK_BREAKDOWN}/g, taskBreakdown.length > 0 ? taskBreakdown : "- (no task timings)")
 
     const atlasAgent = resolveRegisteredAgentName(
-      boulderState.agent ?? (isAgentRegistered("atlas") ? "atlas" : undefined),
+      work.agent ?? (isAgentRegistered("atlas") ? "atlas" : undefined),
     )
     if (atlasAgent && isAgentRegistered(atlasAgent)) {
       await ctx.client.session.promptAsync({
@@ -297,28 +287,28 @@ export async function handleAtlasSessionIdle(input: {
       }
     }
 
-    log(`[${HOOK_NAME}] Boulder complete`, { sessionID, plan: boulderState.plan_name })
+    log(`[${HOOK_NAME}] Boulder complete`, { sessionID, plan: work.plan_name })
     return
   }
 
   if (appendedSession) {
     log(`[${HOOK_NAME}] Appended subagent session to boulder during idle`, {
       sessionID,
-      plan: boulderState.plan_name,
+      plan: work.plan_name,
     })
   }
 
   const canContinueSession = await canContinueTrackedBoulderSession({
     client: ctx.client,
     sessionID,
-    sessionOrigin: boulderState.session_origins?.[sessionID],
-    boulderSessionIDs: boulderState.session_ids,
-    requiredAgent: boulderState.agent,
+    sessionOrigin: work.session_origins?.[sessionID],
+    boulderSessionIDs: work.session_ids,
+    requiredAgent: work.agent,
   })
   if (!canContinueSession) {
     log(`[${HOOK_NAME}] Skipped: tracked descendant agent does not match boulder agent`, {
       sessionID,
-      requiredAgent: boulderState.agent ?? "atlas",
+      requiredAgent: work.agent ?? "atlas",
     })
     return
   }
@@ -386,10 +376,10 @@ export async function handleAtlasSessionIdle(input: {
     sessionID,
     sessionState,
     options,
-    planName: boulderState.plan_name,
+    planName: work.plan_name,
     progress,
-    agent: boulderState.agent,
-    worktreePath: boulderState.worktree_path,
+    agent: work.agent,
+    worktreePath: work.worktree_path,
   })
 }
 
