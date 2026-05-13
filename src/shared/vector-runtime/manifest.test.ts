@@ -325,135 +325,155 @@ describe("validateManifestForSource", () => {
     )
   })
 
+  // #given a structurally valid manifest with dimensions=512 and env with dimensions=768
+  // #when validateManifestForSource is called with env
+  // #then it returns valid: false with dimension mismatch error
+  it("rejects embedding dimension mismatch between manifest and env", () => {
+    const manifest = makeValidManifest()
+    manifest.embedding.dimensions = 512
+    const env = makeEnv({ embedding: { dimensions: 768 } })
+    const result = validateManifestForSource(manifest, "opencode", env)
+
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain(
+      "manifest embedding dimensions 512 does not match resolved dimensions 768",
+    )
+  })
+
+  // #given a structurally valid manifest with dimensions=512 and env with matching dimensions=512
+  // #when validateManifestForSource is called with env
+  // #then it returns valid: true
+  it("accepts matching embedding dimensions between manifest and env", () => {
+    const manifest = makeValidManifest()
+    manifest.embedding.dimensions = 512
+    const env = makeEnv({ embedding: { dimensions: 512 } })
+    const result = validateManifestForSource(manifest, "opencode", env)
+
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
+  })
+
+  // #given a structurally valid manifest with dimensions=512 and env without dimensions configured
+  // #when validateManifestForSource is called with env
+  // #then it returns valid: true (skips dimension check when env has no dimensions)
+  it("skips dimension check when env has no embedding dimensions configured", () => {
+    const manifest = makeValidManifest()
+    manifest.embedding.dimensions = 512
+    const env = makeEnv({ embedding: {} })
+    const result = validateManifestForSource(manifest, "opencode", env)
+
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
+  })
+
   // #given a manifest with missing embedding model
   // #when validateManifestForSource is called
-  // #then it returns valid: false with embedding model error
-  it("rejects manifest with missing embedding model", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts manifest with missing embedding model (structural check is in schema layer)", () => {
     const manifest = makeValidManifest()
     manifest.embedding.model = ""
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      "manifest embedding model is missing or empty",
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with invalid embedding dimensions
   // #when validateManifestForSource is called
-  // #then it returns valid: false with dimensions error
-  it("rejects manifest with zero embedding dimensions", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts manifest with zero embedding dimensions (structural check is in schema layer)", () => {
     const manifest = makeValidManifest()
     manifest.embedding.dimensions = 0
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      "manifest embedding dimensions is invalid: 0",
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with negative embedding dimensions
   // #when validateManifestForSource is called
-  // #then it returns valid: false with dimensions error
-  it("rejects manifest with negative embedding dimensions", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts manifest with negative embedding dimensions (structural check is in schema layer)", () => {
     const manifest = makeValidManifest()
     manifest.embedding.dimensions = -1
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      "manifest embedding dimensions is invalid: -1",
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with non-integer embedding dimensions
   // #when validateManifestForSource is called
-  // #then it returns valid: false with dimensions error
-  it("rejects manifest with non-integer embedding dimensions", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts manifest with non-integer embedding dimensions (structural check is in schema layer)", () => {
     const manifest = makeValidManifest()
     manifest.embedding.dimensions = 3.14
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      "manifest embedding dimensions is invalid: 3.14",
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with wrong contract_version
   // #when validateManifestForSource is called
-  // #then it returns valid: false with contract version error
-  it("rejects manifest with unsupported contract version", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts manifest with unsupported contract version (structural check is in schema layer)", () => {
     const manifest = makeValidManifest({
       contract_version: "vector-runtime/v0" as never,
     })
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      'unsupported contract version: vector-runtime/v0, expected "vector-runtime/v1"',
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with a source entry missing table
   // #when validateManifestForSource is called
-  // #then it returns valid: false with missing table error
-  it("rejects source entry with empty table", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts source entry with empty table (structural check is in schema layer)", () => {
     const manifest = makeValidManifest()
     manifest.sources.opencode.table = ""
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      'source "opencode" table is missing or empty',
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with a source entry missing schema_version
   // #when validateManifestForSource is called
-  // #then it returns valid: false with missing schema_version error
-  it("rejects source entry with empty schema_version", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts source entry with empty schema_version (structural check is in schema layer)", () => {
     const manifest = makeValidManifest()
     manifest.sources.opencode.schema_version = ""
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      'source "opencode" schema_version is missing or empty',
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with a source entry missing source_of_truth
   // #when validateManifestForSource is called
-  // #then it returns valid: false with missing source_of_truth error
-  it("rejects source entry with empty source_of_truth", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts source entry with empty source_of_truth (structural check is in schema layer)", () => {
     const manifest = makeValidManifest()
     manifest.sources.opencode.source_of_truth = ""
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      'source "opencode" source_of_truth is missing or empty',
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with invalid source stats
   // #when validateManifestForSource is called
-  // #then it returns valid: false with source stats errors
-  it("rejects source entry with invalid source stats", () => {
+  // #then it returns valid: true — structural validation is in ManifestSchema (loadManifest layer)
+  it("accepts source entry with invalid source stats (structural check is in schema layer)", () => {
     const manifest = makeValidManifest()
     manifest.sources.opencode.sessions = -1
     manifest.sources.opencode.source_sha256 = "not-a-sha256"
     const result = validateManifestForSource(manifest, "opencode")
 
-    expect(result.valid).toBe(false)
-    expect(result.errors).toContain(
-      'source "opencode" sessions must be a non-negative integer',
-    )
-    expect(result.errors).toContain(
-      'source "opencode" source_sha256 must be a lowercase SHA-256 hex digest',
-    )
+    expect(result.valid).toBe(true)
+    expect(result.errors).toEqual([])
   })
 
   // #given a manifest with a stale last_indexed_at (>24 hours ago)
@@ -520,18 +540,24 @@ describe("validateManifestForSource", () => {
     )
   })
 
-  // #given a valid manifest with multiple validation issues
+  // #given a valid manifest with only compatibility issues (backend mismatch)
   // #when validateManifestForSource is called
-  // #then it collects all errors
-  it("collects multiple validation errors", () => {
+  // #then it collects only compatibility errors (structural checks are in schema layer)
+  it("collects only compatibility errors (backend mismatch)", () => {
     const manifest = makeValidManifest()
+    // Structural issues (model="", dimensions=0) are NOT checked here —
+    // they belong to ManifestSchema in the loadManifest layer
     manifest.embedding.model = ""
     manifest.embedding.dimensions = 0
     const env = makeEnv({ backend: "qdrant" })
     const result = validateManifestForSource(manifest, "opencode", env)
 
     expect(result.valid).toBe(false)
-    expect(result.errors.length).toBeGreaterThanOrEqual(3)
+    // Only the backend mismatch should be reported
+    expect(result.errors.length).toBe(1)
+    expect(result.errors).toContain(
+      'manifest backend "lancedb" does not match resolved backend "qdrant"',
+    )
   })
 
   // #given a valid manifest with source "all"

@@ -125,17 +125,20 @@ export async function loadManifest(
 // ── Source Validation ─────────────────────────────────────────────────
 
 /**
- * Validate a loaded manifest for compatibility with a target source
+ * Validate a loaded manifest for runtime compatibility with a target source
  * namespace and optional runtime environment.
  *
- * Checks performed:
- * - Contract version must be "vector-runtime/v1"
+ * Structural validation (contract_version, backend enum, embedding fields,
+ * source entry fields, source stats, source_sha256) is handled by
+ * `ManifestSchema` during `loadManifest()`. This function only performs
+ * runtime compatibility checks that cannot be expressed in the static schema:
+ *
  * - Backend must match the resolved env backend (when env is provided)
- * - Embedding model and dimensions must be present
+ * - Embedding dimensions must match env.embedding.dimensions (when configured)
  * - For `source !== "all"`: the source namespace must exist in the manifest
- * - Source entry must have non-empty table, schema_version, source_of_truth
  * - Freshness: marks stale when `last_indexed_at` is older than a
  *   deterministic threshold (24 hours)
+ * - Invalid `last_indexed_at` format (not parseable as ISO-8601)
  *
  * Returns `ManifestValidationResult` with errors (blocking) and
  * warnings (non-blocking).
@@ -148,73 +151,29 @@ export function validateManifestForSource(
   const errors: string[] = []
   const warnings: string[] = []
 
-  // INV-1: contract version
-  if (manifest.contract_version !== "vector-runtime/v1") {
-    errors.push(
-      `unsupported contract version: ${manifest.contract_version}, expected "vector-runtime/v1"`,
-    )
-  }
-
-  // Backend compatibility with env
+  // Backend compatibility with env (runtime check)
   if (env && manifest.backend !== env.backend) {
     errors.push(
       `manifest backend "${manifest.backend}" does not match resolved backend "${env.backend}"`,
     )
   }
 
-  // Embedding fields must be present
-  if (!manifest.embedding.model || manifest.embedding.model.trim() === "") {
-    errors.push("manifest embedding model is missing or empty")
-  }
+  // Embedding dimension compatibility with env (runtime check)
   if (
-    !manifest.embedding.dimensions ||
-    manifest.embedding.dimensions <= 0 ||
-    !Number.isInteger(manifest.embedding.dimensions)
+    env?.embedding.dimensions !== undefined &&
+    manifest.embedding.dimensions !== env.embedding.dimensions
   ) {
     errors.push(
-      `manifest embedding dimensions is invalid: ${manifest.embedding.dimensions}`,
+      `manifest embedding dimensions ${manifest.embedding.dimensions} does not match resolved dimensions ${env.embedding.dimensions}`,
     )
   }
 
-  // Source namespace validation
+  // Source namespace existence (runtime check — depends on query source)
   if (source !== "all") {
     const sourceEntry = manifest.sources[source]
     if (!sourceEntry) {
       errors.push(`source namespace "${source}" not found in manifest sources`)
     } else {
-      // Validate source entry fields
-      if (!sourceEntry.table || sourceEntry.table.trim() === "") {
-        errors.push(`source "${source}" table is missing or empty`)
-      }
-      if (
-        !sourceEntry.schema_version ||
-        sourceEntry.schema_version.trim() === ""
-      ) {
-        errors.push(`source "${source}" schema_version is missing or empty`)
-      }
-      if (
-        !sourceEntry.source_of_truth ||
-        sourceEntry.source_of_truth.trim() === ""
-      ) {
-        errors.push(`source "${source}" source_of_truth is missing or empty`)
-      }
-
-      const stats: Array<[string, number]> = [
-        ["sessions", sourceEntry.sessions],
-        ["messages", sourceEntry.messages],
-        ["parts", sourceEntry.parts],
-        ["chunks", sourceEntry.chunks],
-        ["source_bytes", sourceEntry.source_bytes],
-      ]
-      for (const [field, value] of stats) {
-        if (!Number.isInteger(value) || value < 0) {
-          errors.push(`source "${source}" ${field} must be a non-negative integer`)
-        }
-      }
-      if (!/^[a-f0-9]{64}$/.test(sourceEntry.source_sha256)) {
-        errors.push(`source "${source}" source_sha256 must be a lowercase SHA-256 hex digest`)
-      }
-
       // Freshness check: warn if last_indexed_at is older than 24 hours
       if (sourceEntry.last_indexed_at) {
         const indexedAt = Date.parse(sourceEntry.last_indexed_at)
