@@ -9,6 +9,7 @@ import {
   type LanceDbVectorStore,
 } from "../../shared/vector-runtime/lancedb-adapter"
 import type { ManifestContract, ManifestEmbeddingContract } from "../../shared/vector-runtime/types"
+import { extractCoreTextFragments, extractRole, parseSessionData, type TextFragment } from "./session-row"
 
 const OPENCODE_SOURCE = "opencode"
 const OPENCODE_TABLE = "opencode_sessions"
@@ -94,74 +95,25 @@ function safeSegment(segment: string): string {
   return segment.replace(/[^A-Za-z0-9_-]/g, "_")
 }
 
-function parseObject(data: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(data || "{}")
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
-  } catch (error) {
-    throw new Error(`failed to parse OpenCode session JSON: ${String(error)}`)
-  }
-  return {}
-}
-
-function pushStringField(
-  fragments: string[],
-  fields: string[],
-  value: unknown,
-  fieldName: string,
-): void {
-  if (typeof value === "string" && value.length > 0) {
-    fragments.push(value)
-    fields.push(fieldName)
-  }
-}
-
-function extractReasoning(
-  fragments: string[],
-  fields: string[],
-  value: unknown,
-): void {
-  if (typeof value === "string" && value.length > 0) {
-    fragments.push(value)
-    fields.push("reasoning")
-    return
-  }
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const obj = value as Record<string, unknown>
-    pushStringField(fragments, fields, obj.text, "reasoning.text")
-  }
-}
-
 function extractSupportedText(data: string): ExtractedText {
-  const parsed = parseObject(data)
-  const fragments: string[] = []
-  const fields: string[] = []
+  const parsed = parseSessionData(data, { strict: true })
+  const fragments = extractCoreTextFragments(parsed)
 
-  pushStringField(fragments, fields, parsed.text, "text")
-  pushStringField(fragments, fields, parsed.thinking, "thinking")
-  extractReasoning(fragments, fields, parsed.reasoning)
-
-  const state = parsed.state
-  if (state && typeof state === "object" && !Array.isArray(state)) {
-    const stateObj = state as Record<string, unknown>
-    pushStringField(fragments, fields, stateObj.title, "state.title")
-    pushStringField(fragments, fields, stateObj.output, "state.output")
+  // Add reasoning field (not in core set — only vector build indexes it)
+  const reasoning = parsed.reasoning
+  if (typeof reasoning === "string" && reasoning.length > 0) {
+    fragments.push({ text: reasoning, field: "reasoning" })
+  } else if (reasoning && typeof reasoning === "object" && !Array.isArray(reasoning)) {
+    const rObj = reasoning as Record<string, unknown>
+    if (typeof rObj.text === "string" && rObj.text.length > 0) {
+      fragments.push({ text: rObj.text, field: "reasoning.text" })
+    }
   }
-
-  pushStringField(fragments, fields, parsed.prompt, "prompt")
-  pushStringField(fragments, fields, parsed.description, "description")
 
   return {
-    text: fragments.join(" | "),
-    fields,
+    text: fragments.map((f) => f.text).join(" | "),
+    fields: fragments.map((f) => f.field),
   }
-}
-
-function roleFromMessageData(data: string): string {
-  const parsed = parseObject(data)
-  return typeof parsed.role === "string" && parsed.role.length > 0 ? parsed.role : "unknown"
 }
 
 function countRows(db: Database, table: string): number {
@@ -191,22 +143,25 @@ function baseMetadata(row: MessageRow, role: string): Record<string, unknown> {
   }
 }
 
-function chunkFromMessage(
+function buildChunkBase(
   row: MessageRow,
   extracted: ExtractedText,
   updatedAt: string,
+  segment: string,
+  extraMeta: Record<string, unknown>,
 ): LanceDbChunkInput | undefined {
   if (extracted.text.length === 0) return undefined
   const contentHash = hashText(extracted.text)
-  const role = roleFromMessageData(row.message_data)
+  const role = extractRole(row.message_data)
   return {
     source: OPENCODE_SOURCE,
-    chunk_id: `${OPENCODE_SOURCE}:${row.session_id}:${row.message_id}:message:${contentHash}`,
+    chunk_id: `${OPENCODE_SOURCE}:${row.session_id}:${row.message_id}:${segment}:${contentHash}`,
     text: extracted.text,
     metadata: {
       ...baseMetadata(row, role),
-      segment: "message",
+      segment,
       fields: extracted.fields,
+      ...extraMeta,
     },
     schema_version: OPENCODE_SCHEMA_VERSION,
     chunk_hash: contentHash,
@@ -215,32 +170,25 @@ function chunkFromMessage(
   }
 }
 
+function chunkFromMessage(
+  row: MessageRow,
+  extracted: ExtractedText,
+  updatedAt: string,
+): LanceDbChunkInput | undefined {
+  return buildChunkBase(row, extracted, updatedAt, "message", {})
+}
+
 function chunkFromPart(
   row: PartRow,
   extracted: ExtractedText,
   updatedAt: string,
 ): LanceDbChunkInput | undefined {
-  if (extracted.text.length === 0) return undefined
-  const contentHash = hashText(extracted.text)
-  const role = roleFromMessageData(row.message_data)
   const segment = safeSegment(row.part_id)
-  return {
-    source: OPENCODE_SOURCE,
-    chunk_id: `${OPENCODE_SOURCE}:${row.session_id}:${row.message_id}:${segment}:${contentHash}`,
-    text: extracted.text,
-    metadata: {
-      ...baseMetadata(row, role),
-      part_id: row.part_id,
-      segment,
-      fields: extracted.fields,
-      part_time_created: row.part_time_created,
-      part_time_updated: row.part_time_updated,
-    },
-    schema_version: OPENCODE_SCHEMA_VERSION,
-    chunk_hash: contentHash,
-    embedding: [],
-    updated_at: updatedAt,
-  }
+  return buildChunkBase(row, extracted, updatedAt, segment, {
+    part_id: row.part_id,
+    part_time_created: row.part_time_created,
+    part_time_updated: row.part_time_updated,
+  })
 }
 
 function loadChunks(db: Database, updatedAt: string, limitSessions?: number): LanceDbChunkInput[] {

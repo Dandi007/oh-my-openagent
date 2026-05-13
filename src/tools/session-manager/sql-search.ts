@@ -3,6 +3,7 @@ import { existsSync } from "node:fs"
 import { isAbsolute, join } from "node:path"
 import { getDataDir } from "../../shared/data-path"
 import type { SearchResult } from "./types"
+import { extractCoreTextFragments, extractRole, parseSessionData } from "./session-row"
 
 export interface SQLSearchOptions {
   query: string
@@ -75,29 +76,18 @@ function snippetAround(text: string, query: string, contextSize = 80): string {
 }
 
 function extractPartText(data: string): { text: string; raw: string } {
-  let parsed: Record<string, unknown> = {}
+  // Detect malformed JSON — only actual parse failures trigger raw-text fallback.
+  // Valid empty objects like {} must NOT be treated as malformed.
   try {
-    parsed = JSON.parse(data || "{}") as Record<string, unknown>
+    JSON.parse(data || "{}")
   } catch {
     return { text: data || "", raw: data || "" }
   }
-
-  const fragments: string[] = []
-  if (typeof parsed.text === "string" && parsed.text) fragments.push(parsed.text)
-  if (typeof parsed.thinking === "string" && parsed.thinking) fragments.push(parsed.thinking)
-
-  const state = parsed.state
-  if (typeof state === "object" && state !== null) {
-    const stateObj = state as Record<string, unknown>
-    if (typeof stateObj.title === "string" && stateObj.title) fragments.push(stateObj.title)
-    if (typeof stateObj.output === "string" && stateObj.output) fragments.push(stateObj.output)
-  }
-
-  if (typeof parsed.prompt === "string" && parsed.prompt) fragments.push(parsed.prompt)
-  if (typeof parsed.description === "string" && parsed.description) fragments.push(parsed.description)
-
+  // Valid JSON — use shared helpers for field extraction
+  const parsed = parseSessionData(data)
+  const fragments = extractCoreTextFragments(parsed)
   const raw = JSON.stringify(parsed)
-  return { text: fragments.join(" | "), raw }
+  return { text: fragments.map((f) => f.text).join(" | "), raw }
 }
 
 function countMatches(text: string, term: string): number {
@@ -163,13 +153,8 @@ function executeSQLSearch(
       const key = `${row.session_id}:${row.message_id}`
       if (seen.has(key)) continue
 
-      let parsed: Record<string, unknown> = {}
-      try {
-        parsed = JSON.parse(row.data || "{}") as Record<string, unknown>
-      } catch {
-        parsed = {}
-      }
-      const role = typeof parsed.role === "string" ? parsed.role : "unknown"
+      const parsed = parseSessionData(row.data)
+      const role = extractRole(row.data)
 
       const partRows = table === "part" && row.matched_part_data
         ? [{ data: row.matched_part_data }]
