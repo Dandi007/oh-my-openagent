@@ -1,23 +1,31 @@
 import { statSync } from "node:fs"
+import { basename } from "node:path"
 import {
-  appendSessionId,
+  appendSessionIdForWork,
   addBoulderWork,
   createBoulderState,
   findPrometheusPlans,
   getActiveWorks,
-  getPlanName,
   getPlanProgress,
+  getWorkById,
   getWorkByPlanName,
   getWorkResumeOptions,
   readBoulderState,
-  resolveBoulderPlanPath,
+  readBoulderWork,
+  resolveBoulderPlanPathForWork,
   selectActiveWork,
   writeBoulderState,
+  writeBoulderWork,
 } from "../../features/boulder-state"
+import type { BoulderWorkState } from "../../features/boulder-state"
 import { log } from "../../shared/logger"
 import { createWorktreeActiveBlock } from "./worktree-block"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { HOOK_NAME } from "./start-work-hook"
+
+function getPlanName(planPath: string): string {
+  return basename(planPath, ".md")
+}
 
 function normalizePlanLookupValue(value: string): string {
   return value
@@ -198,17 +206,15 @@ function buildExplicitPlanContext(params: {
 
   const matchedWork = getWorkByPlanName(directory, explicitPlanName, { worktreePath })
   if (matchedWork) {
-    const selectedState = selectActiveWork(directory, matchedWork.work_id)
-    if (selectedState) {
-      return buildExistingSessionContext({
-        existingState: selectedState,
-        sessionId,
-        activeAgent,
-        worktreePath,
-        worktreeBlock,
-        directory,
-      })
-    }
+    selectActiveWork(directory, matchedWork.work_id)
+    return buildExistingSessionContext({
+      work: matchedWork,
+      sessionId,
+      activeAgent,
+      worktreePath,
+      worktreeBlock,
+      directory,
+    })
   }
 
   const allPlans = findPrometheusPlans(directory)
@@ -243,40 +249,44 @@ function buildExplicitPlanContext(params: {
 }
 
 function buildExistingSessionContext(params: {
-  existingState: NonNullable<ReturnType<typeof readBoulderState>>
+  work: BoulderWorkState
   sessionId: string
   activeAgent: string
   worktreePath: string | undefined
   worktreeBlock: string
   directory: string
 }): string {
-  const { existingState, sessionId, activeAgent, worktreePath, worktreeBlock, directory } = params
-  const planPath = resolveBoulderPlanPath(directory, existingState)
+  const { work, sessionId, activeAgent, worktreePath, worktreeBlock, directory } = params
+  const planPath = resolveBoulderPlanPathForWork(directory, work)
   const progress = getPlanProgress(planPath)
   if (progress.isComplete) {
     return `
 ## Previous Work Complete
 
-The previous plan (${existingState.plan_name}) has been completed.
+The previous plan (${work.plan_name}) has been completed.
 Looking for new plans...`
   }
 
-  const effectiveWorktree = worktreePath ?? existingState.worktree_path
-  const sessionAlreadyTracked = existingState.session_ids.includes(sessionId)
-  const updatedSessions = sessionAlreadyTracked
-    ? existingState.session_ids
-    : [...existingState.session_ids, sessionId]
-  const shouldRewriteState = existingState.agent !== activeAgent || worktreePath !== undefined
+  const effectiveWorktree = worktreePath ?? work.worktree_path
+  const sessionAlreadyTracked = work.session_ids.includes(sessionId)
+  const shouldRewriteState = work.agent !== activeAgent || worktreePath !== undefined
+
+  // Always use appendSessionIdForWork for session tracking — it updates
+  // session_origins and the index, not just the work file.
+  if (!sessionAlreadyTracked) {
+    appendSessionIdForWork(directory, work.work_id, sessionId)
+  }
 
   if (shouldRewriteState) {
-    writeBoulderState(directory, {
-      ...existingState,
+    // Re-read work after appendSessionIdForWork to get updated session_ids
+    const refreshedWork = readBoulderWork(directory, work.work_id) ?? work
+    const updatedWork: BoulderWorkState = {
+      ...refreshedWork,
       agent: activeAgent,
       ...(worktreePath !== undefined ? { worktree_path: worktreePath } : {}),
-      session_ids: updatedSessions,
-    })
-  } else if (!sessionAlreadyTracked) {
-    appendSessionId(directory, sessionId)
+      updated_at: new Date().toISOString(),
+    }
+    writeBoulderWork(directory, work.work_id, updatedWork)
   }
 
   const worktreeDisplay = effectiveWorktree
@@ -287,11 +297,11 @@ Looking for new plans...`
 ## Active Work Session Found
 
 **Status**: RESUMING existing work
-**Plan**: ${existingState.plan_name}
+**Plan**: ${work.plan_name}
 **Path**: ${planPath}
 **Progress**: ${progress.completed}/${progress.total} tasks completed
-**Sessions**: ${existingState.session_ids.length + 1} (current session appended)
-**Started**: ${existingState.started_at}
+**Sessions**: ${work.session_ids.length + 1} (current session appended)
+**Started**: ${work.started_at}
 ${worktreeDisplay}
 
 The current session (${sessionId}) has been added to session_ids.
@@ -300,14 +310,14 @@ Read the plan file and continue from the first unchecked task.`
 
 function shouldDiscoverPlans(
   directory: string,
-  existingState: ReturnType<typeof readBoulderState>,
+  activeWork: BoulderWorkState | null,
   explicitPlanName: string | null,
 ): boolean {
-  return (!existingState && !explicitPlanName)
+  return (!activeWork && !explicitPlanName)
     || (
-      existingState !== null
+      activeWork !== null
       && !explicitPlanName
-      && getPlanProgress(resolveBoulderPlanPath(directory, existingState)).isComplete
+      && getPlanProgress(resolveBoulderPlanPathForWork(directory, activeWork)).isComplete
     )
 }
 
@@ -400,10 +410,11 @@ export function buildStartWorkContextInfo(params: {
 
   if (!explicitPlanName && resumeOptions.length === 1) {
     const onlyOption = resumeOptions[0]
-    const selectedState = selectActiveWork(ctx.directory, onlyOption.work_id)
-    if (selectedState) {
+    const work = getWorkById(ctx.directory, onlyOption.work_id)
+    if (work) {
+      selectActiveWork(ctx.directory, onlyOption.work_id)
       return buildExistingSessionContext({
-        existingState: selectedState,
+        work,
         sessionId,
         activeAgent,
         worktreePath,
@@ -437,17 +448,24 @@ export function buildStartWorkContextInfo(params: {
       directory: ctx.directory,
     })
   } else if (existingState) {
-    contextInfo = buildExistingSessionContext({
-      existingState,
-      sessionId,
-      activeAgent,
-      worktreePath,
-      worktreeBlock,
-      directory: ctx.directory,
-    })
+    const activeWorks = getActiveWorks(ctx.directory)
+    if (activeWorks.length > 0) {
+      contextInfo = buildExistingSessionContext({
+        work: activeWorks[0],
+        sessionId,
+        activeAgent,
+        worktreePath,
+        worktreeBlock,
+        directory: ctx.directory,
+      })
+    }
   }
 
-  if (shouldDiscoverPlans(ctx.directory, existingState, explicitPlanName)) {
+  // Find active work for plan discovery check
+  const activeWorks = getActiveWorks(ctx.directory)
+  const activeWork = activeWorks.length > 0 ? activeWorks[0] : null
+
+  if (shouldDiscoverPlans(ctx.directory, activeWork, explicitPlanName)) {
     return buildPlanDiscoveryContext({
       contextInfo,
       sessionId,
