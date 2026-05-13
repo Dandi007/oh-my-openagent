@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs"
 import type { SearchResult } from "./types"
-import { resolveVectorRuntimeEnv } from "../../shared/vector-runtime/env"
+import { resolveVectorConfig } from "../../shared/vector-runtime/paths"
 import {
   resolveManifestPath,
   loadManifest,
@@ -14,7 +14,6 @@ import {
   createLanceDbVectorStore,
   type LanceDbVectorStore,
 } from "../../shared/vector-runtime/lancedb-adapter"
-import { getDefaultVectorCachePaths } from "../../shared/vector-runtime/cache-paths"
 import type { QueryResult } from "../../shared/vector-runtime/types"
 
 const OPENCODE_SOURCE = "opencode"
@@ -95,19 +94,22 @@ export async function queryVectorAdapter(
   }
 
   const envInput = buildEnvInput(options._env, options.timeoutMs)
-  const { env } = resolveVectorRuntimeEnv(envInput)
+
+  // Resolve vector paths and config via shared resolver.
+  // Precedence: explicit overrides (none here) > env vars > default cache paths.
+  const config = resolveVectorConfig({}, envInput)
+
   const rawBackend = envInput?.AGENT_VECTOR_DB_BACKEND?.trim()
-  const effectiveBackend = env.backend === "noop" && !rawBackend ? "lancedb" : env.backend
+  const effectiveBackend = config.backend === "noop" && !rawBackend ? "lancedb" : config.backend
 
   if (effectiveBackend !== "lancedb") {
     return []
   }
 
-  const defaultCachePaths = getDefaultVectorCachePaths(envInput)
-  const dbPath = env.dbPath ?? defaultCachePaths.indexPath
-  const manifestPath = env.manifestPath ?? defaultCachePaths.manifestPath
+  const dbPath = config.indexPath
+  const manifestPath = config.manifestPath
 
-  if (!env.embedding.endpoint) {
+  if (!config.embedding.endpoint) {
     return []
   }
 
@@ -115,7 +117,7 @@ export async function queryVectorAdapter(
     return []
   }
 
-  const resolvedManifestPath = resolveManifestPath({ ...env, manifestPath })
+  const resolvedManifestPath = resolveManifestPath({ ...config, manifestPath, dbPath })
   if (!resolvedManifestPath) return []
 
   const manifestResult = await loadManifest(resolvedManifestPath)
@@ -124,7 +126,7 @@ export async function queryVectorAdapter(
   }
 
   const validationEnv = {
-    ...env,
+    ...config,
     backend: effectiveBackend,
     dbPath,
     manifestPath: resolvedManifestPath,
@@ -144,7 +146,11 @@ export async function queryVectorAdapter(
     return []
   }
 
-  const embeddingClient = createHttpEmbeddingClient(env)
+  const embeddingClient = createHttpEmbeddingClient({
+    backend: effectiveBackend,
+    embedding: config.embedding,
+    timeoutMs: config.timeoutMs,
+  })
   const vectorStore = createLanceDbVectorStore({
     dbPath,
     tableName: sourceEntry.table,

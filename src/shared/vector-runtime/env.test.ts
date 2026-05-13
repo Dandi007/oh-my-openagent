@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { resolveVectorRuntimeEnv } from "./env"
+import { resolveVectorConfig } from "./paths"
 import type { EnvResolutionResult } from "./env"
+import { existsSync, mkdirSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -384,5 +388,187 @@ describe("resolveVectorRuntimeEnv — edge cases", () => {
     expect(result.diagnostics[0]).toBe(
       "vector_config_missing: no vector backend or embedding configuration detected; semantic search is unavailable",
     )
+  })
+})
+
+// ── resolveVectorConfig tests ─────────────────────────────────────────
+
+describe("resolveVectorConfig — path precedence", () => {
+  test("explicit overrides win over env vars", () => {
+    // #given explicit overrides and env vars both set
+    const config = resolveVectorConfig(
+      { indexPath: "/explicit/index", manifestPath: "/explicit/manifest.json" },
+      {
+        AGENT_VECTOR_DB_PATH: "/env/index",
+        AGENT_VECTOR_MANIFEST: "/env/manifest.json",
+      },
+    )
+    // #then explicit overrides are used
+    expect(config.indexPath).toBe("/explicit/index")
+    expect(config.manifestPath).toBe("/explicit/manifest.json")
+  })
+
+  test("env vars win over default cache paths", () => {
+    // #given env vars set but no explicit overrides
+    const xdgCacheHome = join(tmpdir(), `omo-env-test-cache-${Date.now()}`)
+    const config = resolveVectorConfig(
+      {},
+      {
+        XDG_CACHE_HOME: xdgCacheHome,
+        AGENT_VECTOR_DB_PATH: "/env/index",
+        AGENT_VECTOR_MANIFEST: "/env/manifest.json",
+      },
+    )
+    // #then env vars are used, not defaults
+    expect(config.indexPath).toBe("/env/index")
+    expect(config.manifestPath).toBe("/env/manifest.json")
+  })
+
+  test("default cache paths are used when nothing is set", () => {
+    // #given no overrides and no env vars
+    const xdgCacheHome = join(tmpdir(), `omo-env-test-default-${Date.now()}`)
+    const config = resolveVectorConfig(
+      {},
+      { XDG_CACHE_HOME: xdgCacheHome },
+    )
+    // #then default cache paths are used
+    const expectedDir = join(xdgCacheHome, "oh-my-opencode", "vector")
+    expect(config.indexPath).toBe(join(expectedDir, "opencode-sessions"))
+    expect(config.manifestPath).toBe(join(expectedDir, "vector-manifest.json"))
+  })
+
+  test("explicit manifest override wins but indexPath falls back to env", () => {
+    // #given only manifest override, env provides indexPath
+    const config = resolveVectorConfig(
+      { manifestPath: "/explicit/manifest.json" },
+      { AGENT_VECTOR_DB_PATH: "/env/index" },
+    )
+    // #then manifest uses override, indexPath uses env
+    expect(config.indexPath).toBe("/env/index")
+    expect(config.manifestPath).toBe("/explicit/manifest.json")
+  })
+
+  test("explicit indexPath override wins but manifestPath falls back to env", () => {
+    // #given only indexPath override, env provides manifestPath
+    const config = resolveVectorConfig(
+      { indexPath: "/explicit/index" },
+      { AGENT_VECTOR_MANIFEST: "/env/manifest.json" },
+    )
+    // #then indexPath uses override, manifestPath uses env
+    expect(config.indexPath).toBe("/explicit/index")
+    expect(config.manifestPath).toBe("/env/manifest.json")
+  })
+})
+
+describe("resolveVectorConfig — embedding and backend", () => {
+  test("embedding config is propagated from env resolver", () => {
+    // #given full embedding config in env
+    const config = resolveVectorConfig(
+      {},
+      {
+        AGENT_EMBEDDING_ENDPOINT: "http://localhost:8080/v1/embeddings",
+        AGENT_EMBEDDING_MODEL: "test-model",
+        AGENT_EMBEDDING_DIMENSIONS: "768",
+      },
+    )
+    // #then embedding fields are resolved
+    expect(config.embedding.endpoint).toBe("http://localhost:8080/v1/embeddings")
+    expect(config.embedding.model).toBe("test-model")
+    expect(config.embedding.dimensions).toBe(768)
+  })
+
+  test("backend is propagated from env resolver", () => {
+    // #given lancedb backend in env
+    const config = resolveVectorConfig(
+      {},
+      { AGENT_VECTOR_DB_BACKEND: "lancedb" },
+    )
+    // #then backend is lancedb
+    expect(config.backend).toBe("lancedb")
+  })
+
+  test("timeoutMs is propagated from env resolver", () => {
+    // #given timeout in env
+    const config = resolveVectorConfig(
+      {},
+      { AGENT_VECTOR_TIMEOUT_MS: "15000" },
+    )
+    // #then timeoutMs is resolved
+    expect(config.timeoutMs).toBe(15000)
+  })
+})
+
+describe("resolveVectorConfig — secret safety", () => {
+  test("API keys are not exposed in resolved config", () => {
+    // #given env with API keys
+    const config = resolveVectorConfig(
+      {},
+      {
+        AGENT_VECTOR_DB_API_KEY: "secret-db-key",
+        AGENT_EMBEDDING_API_KEY: "secret-embed-key",
+        AGENT_VECTOR_DB_BACKEND: "lancedb",
+        AGENT_EMBEDDING_ENDPOINT: "http://localhost:8080",
+      },
+    )
+    // #then API keys are not in the serialized result
+    const serialized = JSON.stringify(config)
+    expect(serialized).not.toContain("secret-db-key")
+    expect(serialized).not.toContain("secret-embed-key")
+    // #and non-secret fields are still resolved
+    expect(config.backend).toBe("lancedb")
+    expect(config.embedding.endpoint).toBe("http://localhost:8080")
+  })
+})
+
+describe("resolveVectorConfig — diagnostics", () => {
+  test("diagnostics are propagated from env resolver", () => {
+    // #given invalid backend
+    const config = resolveVectorConfig(
+      {},
+      { AGENT_VECTOR_DB_BACKEND: "pinecone" },
+    )
+    // #then diagnostic is present
+    expect(config.diagnostics.length).toBeGreaterThan(0)
+    expect(config.diagnostics.some((d) => d.includes("pinecone"))).toBe(true)
+  })
+
+  test("vector_config_missing diagnostic is emitted when no config is set", () => {
+    // #given empty env
+    const config = resolveVectorConfig({}, {})
+    // #then vector_config_missing diagnostic is present
+    expect(config.diagnostics.length).toBeGreaterThan(0)
+    expect(config.diagnostics.some((d) => d.includes("vector_config_missing"))).toBe(true)
+  })
+})
+
+describe("resolveVectorConfig — createDirectories", () => {
+  test("createDirectories: true creates the cache directory", () => {
+    // #given a fresh XDG_CACHE_HOME
+    const xdgCacheHome = join(tmpdir(), `omo-env-test-mkdir-${Date.now()}`)
+    const expectedDir = join(xdgCacheHome, "oh-my-opencode", "vector")
+    try {
+      expect(existsSync(expectedDir)).toBe(false)
+      // #when resolving with createDirectories: true
+      resolveVectorConfig({}, { XDG_CACHE_HOME: xdgCacheHome }, { createDirectories: true })
+      // #then the cache directory is created
+      expect(existsSync(expectedDir)).toBe(true)
+    } finally {
+      rmSync(xdgCacheHome, { recursive: true, force: true })
+    }
+  })
+
+  test("createDirectories: false does not create the cache directory", () => {
+    // #given a fresh XDG_CACHE_HOME
+    const xdgCacheHome = join(tmpdir(), `omo-env-test-nomkdir-${Date.now()}`)
+    const expectedDir = join(xdgCacheHome, "oh-my-opencode", "vector")
+    try {
+      expect(existsSync(expectedDir)).toBe(false)
+      // #when resolving without createDirectories
+      resolveVectorConfig({}, { XDG_CACHE_HOME: xdgCacheHome })
+      // #then the cache directory is NOT created
+      expect(existsSync(expectedDir)).toBe(false)
+    } finally {
+      rmSync(xdgCacheHome, { recursive: true, force: true })
+    }
   })
 })

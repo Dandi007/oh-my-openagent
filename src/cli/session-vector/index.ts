@@ -1,9 +1,8 @@
 import { Command } from "commander"
 import { existsSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
-import { resolveVectorRuntimeEnv } from "../../shared/vector-runtime/env"
+import { resolveVectorConfig } from "../../shared/vector-runtime/paths"
 import { createHttpEmbeddingClient } from "../../shared/vector-runtime/embedding-client"
-import { getDefaultVectorCachePaths } from "../../shared/vector-runtime/cache-paths"
 import { buildOpenCodeSessionVectorIndex } from "../../tools/session-manager/vector-build"
 import { getDBPath } from "../../tools/session-manager/sql-search"
 import type { ManifestEmbeddingContract } from "../../shared/vector-runtime/types"
@@ -73,21 +72,16 @@ Environment:
           throw new Error(`source OpenCode database not found: ${sourceDbPath}`)
         }
 
-        const defaultCachePaths = getDefaultVectorCachePaths(undefined, {
-          createDirectories: true,
-        })
-        const envIndexPath = process.env.AGENT_VECTOR_DB_PATH?.trim()
-        const envManifestPath = process.env.AGENT_VECTOR_MANIFEST?.trim()
+        // Resolve vector paths and embedding config via shared resolver.
+        // Precedence: explicit --index/--manifest > env vars > default cache paths.
+        const config = resolveVectorConfig(
+          { indexPath: options.index, manifestPath: options.manifest },
+          undefined,
+          { createDirectories: true },
+        )
 
-        // Resolve index path: explicit --index > AGENT_VECTOR_DB_PATH > cache default
-        const indexPath: string =
-          options.index ??
-          (envIndexPath || defaultCachePaths.indexPath)
-
-        // Resolve manifest path: explicit --manifest > AGENT_VECTOR_MANIFEST > cache default
-        const manifestPath: string =
-          options.manifest ??
-          (envManifestPath || defaultCachePaths.manifestPath)
+        const indexPath = config.indexPath
+        const manifestPath = config.manifestPath
 
         // Ensure parent directory exists for index and manifest
         const indexParent = dirname(indexPath)
@@ -95,19 +89,18 @@ Environment:
         const manifestParent = dirname(manifestPath)
         ensureDir(manifestParent)
 
-        // Resolve embedding config from environment
-        const { env, diagnostics } = resolveVectorRuntimeEnv()
-        if (!env.embedding.endpoint) {
+        // Validate embedding config from resolved config
+        if (!config.embedding.endpoint) {
           throw new Error(
             "embedding endpoint is not configured: set AGENT_EMBEDDING_ENDPOINT",
           )
         }
-        if (!env.embedding.model) {
+        if (!config.embedding.model) {
           throw new Error(
             "embedding model is not configured: set AGENT_EMBEDDING_MODEL",
           )
         }
-        if (!env.embedding.dimensions || env.embedding.dimensions <= 0) {
+        if (!config.embedding.dimensions || config.embedding.dimensions <= 0) {
           throw new Error(
             "embedding dimensions not configured: set AGENT_EMBEDDING_DIMENSIONS to a positive integer",
           )
@@ -123,13 +116,17 @@ Environment:
           }
         }
 
-        const embeddingClient = createHttpEmbeddingClient(env)
+        const embeddingClient = createHttpEmbeddingClient({
+          backend: config.backend,
+          embedding: config.embedding,
+          timeoutMs: config.timeoutMs,
+        })
 
         const embedding: ManifestEmbeddingContract = {
           provider: "http",
-          endpoint: env.embedding.endpoint,
-          model: env.embedding.model,
-          dimensions: env.embedding.dimensions,
+          endpoint: config.embedding.endpoint,
+          model: config.embedding.model,
+          dimensions: config.embedding.dimensions,
         }
 
         const result = await buildOpenCodeSessionVectorIndex({

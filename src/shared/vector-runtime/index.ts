@@ -1,5 +1,6 @@
 export * from "./types"
 export * from "./env"
+export * from "./paths"
 export * from "./schemas"
 export * from "./manifest"
 export * from "./cache-paths"
