@@ -319,7 +319,7 @@ describe("session-vector build CLI", () => {
     expect(existsSync(expectedManifestPath)).toBe(true)
 
     const results = await queryVectorAdapter("CLI test message", {
-      _env: env,
+      _deps: { env },
       topK: 3,
     })
 

@@ -126,7 +126,7 @@ describe("vector-adapter", () => {
 
     test("returns empty array when no vector config env vars are set", async () => {
       const results = await queryVectorAdapter("pipeline", {
-        _env: noVectorConfigEnv(),
+        _deps: { env: noVectorConfigEnv() },
       })
 
       expect(results).toEqual([])
@@ -140,12 +140,12 @@ describe("vector-adapter", () => {
         expect(existsSync(defaultIndexPath)).toBe(false)
 
         const results = await queryVectorAdapter("pipeline", {
-          _env: {
+          _deps: { env: {
             XDG_CACHE_HOME: xdgCacheHome,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
         })
 
         expect(results).toEqual([])
@@ -165,7 +165,7 @@ describe("vector-adapter", () => {
       }
 
       const results = await queryVectorAdapter("pipeline", {
-        _env: env,
+        _deps: { env },
       })
 
       expect(results).toEqual([])
@@ -173,7 +173,7 @@ describe("vector-adapter", () => {
 
     test("returns empty array when manifest file does not exist", async () => {
       const results = await queryVectorAdapter("pipeline", {
-        _env: validVectorConfigEnv(),
+        _deps: { env: validVectorConfigEnv() },
       })
 
       expect(results).toEqual([])
@@ -190,7 +190,7 @@ describe("vector-adapter", () => {
       }
 
       const results = await queryVectorAdapter("pipeline", {
-        _env: env,
+        _deps: { env },
       })
 
       expect(results).toEqual([])
@@ -207,7 +207,7 @@ describe("vector-adapter", () => {
       }
 
       const results = await queryVectorAdapter("pipeline", {
-        _env: env,
+        _deps: { env },
       })
 
       expect(results).toEqual([])
@@ -223,14 +223,14 @@ describe("vector-adapter", () => {
         expect(existsSync(missingDbPath)).toBe(false)
 
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: missingDbPath,
             AGENT_VECTOR_MANIFEST: fixture.manifestPath,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
         })
 
         expect(results).toEqual([])
@@ -248,14 +248,14 @@ describe("vector-adapter", () => {
       try {
         const start = Date.now()
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: fixture.dbPath,
             AGENT_VECTOR_MANIFEST: fixture.manifestPath,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
           timeoutMs: 5000,
         })
         const elapsed = Date.now() - start
@@ -273,7 +273,7 @@ describe("vector-adapter", () => {
       try {
         const start = Date.now()
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: fixture.dbPath,
             AGENT_VECTOR_MANIFEST: fixture.manifestPath,
@@ -281,7 +281,7 @@ describe("vector-adapter", () => {
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
             AGENT_VECTOR_TIMEOUT_MS: "999999",
-          },
+          } },
           timeoutMs: 5000,
         })
         const elapsed = Date.now() - start
@@ -298,9 +298,11 @@ describe("vector-adapter", () => {
     test("returns valid SearchResult array from mock vector store", async () => {
       const qr = makeQueryResult()
       const results = await queryVectorAdapter("deployment", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qr]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qr]),
+        },
       })
 
       expect(results.length).toBe(1)
@@ -327,9 +329,11 @@ describe("vector-adapter", () => {
       })
 
       const results = await queryVectorAdapter("deployment", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qr]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qr]),
+        },
       })
 
       expect(results.length).toBe(1)
@@ -374,9 +378,11 @@ describe("vector-adapter", () => {
       })
 
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qr1, qr2]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qr1, qr2]),
+        },
       })
 
       const sesDup = results.filter((r) => r.session_id === "ses_dup")
@@ -399,15 +405,19 @@ describe("vector-adapter", () => {
       })
 
       const results1 = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qr]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qr]),
+        },
       })
 
       const results2 = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qr]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qr]),
+        },
       })
 
       expect(results1.length).toBe(1)
@@ -444,9 +454,11 @@ describe("vector-adapter", () => {
       })
 
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qrAlpha, qrBeta]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qrAlpha, qrBeta]),
+        },
         sessionId: "ses_beta",
       })
 
@@ -484,9 +496,11 @@ describe("vector-adapter", () => {
       })
 
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qrAlpha, qrBeta]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qrAlpha, qrBeta]),
+        },
       })
 
       expect(results.length).toBe(2)
@@ -521,9 +535,11 @@ describe("vector-adapter", () => {
       })
 
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qrGood, qrBad]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qrGood, qrBad]),
+        },
       })
 
       expect(results.length).toBe(1)
@@ -539,9 +555,11 @@ describe("vector-adapter", () => {
 
       const qr = makeQueryResult()
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: failingClient,
-        _vectorStore: mockVectorStore([qr]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: failingClient,
+          vectorStore: mockVectorStore([qr]),
+        },
       })
 
       expect(results).toEqual([])
@@ -557,9 +575,11 @@ describe("vector-adapter", () => {
       }
 
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: failingStore,
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: failingStore,
+        },
       })
 
       expect(results).toEqual([])
@@ -567,9 +587,11 @@ describe("vector-adapter", () => {
 
     test("returns empty array when vector store returns empty results", async () => {
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([]),
+        },
       })
 
       expect(results).toEqual([])
@@ -587,9 +609,11 @@ describe("vector-adapter", () => {
       }
 
       await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: capturingStore,
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: capturingStore,
+        },
         topK: 7,
       })
 
@@ -608,9 +632,11 @@ describe("vector-adapter", () => {
       }
 
       await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: capturingStore,
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: capturingStore,
+        },
       })
 
       expect(capturedTopK).toBe(10)
@@ -645,9 +671,11 @@ describe("vector-adapter", () => {
       })
 
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qr1, qr2]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qr1, qr2]),
+        },
       })
 
       expect(results.length).toBe(1)
@@ -666,9 +694,11 @@ describe("vector-adapter", () => {
       }
 
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qr]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qr]),
+        },
       })
 
       expect(results.length).toBe(1)
@@ -680,9 +710,11 @@ describe("vector-adapter", () => {
     test("does not create or build index directories during query", async () => {
       const qr = makeQueryResult()
       const results = await queryVectorAdapter("test", {
-        _env: validVectorConfigEnv(),
-        _embeddingClient: mockEmbeddingClient(),
-        _vectorStore: mockVectorStore([qr]),
+        _deps: {
+          env: validVectorConfigEnv(),
+          embeddingClient: mockEmbeddingClient(),
+          vectorStore: mockVectorStore([qr]),
+        },
       })
 
       expect(results.length).toBe(1)
@@ -703,14 +735,14 @@ describe("vector-adapter", () => {
 
       try {
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: dbPath,
             AGENT_VECTOR_MANIFEST: manifestPath,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
         })
 
         expect(results).toEqual([])
@@ -741,14 +773,14 @@ describe("vector-adapter", () => {
 
       try {
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: dbPath,
             AGENT_VECTOR_MANIFEST: manifestPath,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
         })
 
         expect(results).toEqual([])
@@ -795,14 +827,14 @@ describe("vector-adapter", () => {
 
       try {
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: dbPath,
             AGENT_VECTOR_MANIFEST: manifestPath,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
         })
 
         expect(results).toEqual([])
@@ -849,14 +881,14 @@ describe("vector-adapter", () => {
 
       try {
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: dbPath,
             AGENT_VECTOR_MANIFEST: manifestPath,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
         })
 
         expect(results).toEqual([])
@@ -903,14 +935,14 @@ describe("vector-adapter", () => {
 
       try {
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: dbPath,
             AGENT_VECTOR_MANIFEST: manifestPath,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
         })
 
         expect(results).toEqual([])
@@ -932,14 +964,14 @@ describe("vector-adapter", () => {
 
       try {
         const results = await queryVectorAdapter("test query", {
-          _env: {
+          _deps: { env: {
             AGENT_VECTOR_DB_BACKEND: "lancedb",
             AGENT_VECTOR_DB_PATH: missingDbPath,
             AGENT_VECTOR_MANIFEST: missingManifestPath,
             AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
             AGENT_EMBEDDING_MODEL: "test-model",
             AGENT_EMBEDDING_DIMENSIONS: "4",
-          },
+          } },
         })
 
         expect(results).toEqual([])

@@ -2,7 +2,6 @@ import { existsSync } from "node:fs"
 import type { SearchResult } from "./types"
 import { resolveVectorConfig } from "../../shared/vector-runtime/paths"
 import {
-  resolveManifestPath,
   loadManifest,
   validateManifestForSource,
 } from "../../shared/vector-runtime/manifest"
@@ -18,13 +17,18 @@ import type { QueryResult } from "../../shared/vector-runtime/types"
 
 const OPENCODE_SOURCE = "opencode"
 
+/** Test-injectable dependencies for queryVectorAdapter. */
+export interface VectorAdapterDeps {
+  env?: Record<string, string | undefined>
+  embeddingClient?: EmbeddingClient
+  vectorStore?: LanceDbVectorStore
+}
+
 interface VectorAdapterOptions {
   topK?: number
   sessionId?: string
   timeoutMs?: number
-  _env?: Record<string, string | undefined>
-  _embeddingClient?: EmbeddingClient
-  _vectorStore?: LanceDbVectorStore
+  _deps?: VectorAdapterDeps
 }
 
 function deterministicSuffix(input: string): string {
@@ -65,6 +69,73 @@ function queryResultToSearchResult(item: QueryResult): SearchResult {
   }
 }
 
+/**
+ * Resolve the runtime context for vector query: either from test-injected
+ * dependencies or from environment-based configuration.
+ *
+ * Returns `null` when vector is unavailable (missing config, invalid
+ * manifest, wrong backend, etc.) — the caller returns `[]` gracefully.
+ */
+async function resolveVectorContext(
+  options: VectorAdapterOptions,
+): Promise<{ embeddingClient: EmbeddingClient; vectorStore: LanceDbVectorStore } | null> {
+  const deps = options._deps
+
+  // ── Test injection path: both clients provided → use directly ─────
+  if (deps?.embeddingClient && deps?.vectorStore) {
+    return {
+      embeddingClient: deps.embeddingClient,
+      vectorStore: deps.vectorStore,
+    }
+  }
+
+  // ── Env-based resolution ──────────────────────────────────────────
+  const envInput = buildEnvInput(deps?.env, options.timeoutMs)
+
+  // Resolve vector paths and config via shared resolver.
+  // Precedence: explicit overrides (none here) > env vars > default cache paths.
+  const config = resolveVectorConfig({}, envInput)
+
+  const rawBackend = envInput?.AGENT_VECTOR_DB_BACKEND?.trim()
+  const effectiveBackend = config.backend === "noop" && !rawBackend ? "lancedb" : config.backend
+
+  if (effectiveBackend !== "lancedb") return null
+  if (!config.embedding.endpoint) return null
+
+  const dbPath = config.indexPath
+  if (!existsSync(dbPath)) return null
+
+  const manifestPath = config.manifestPath
+  if (!manifestPath) return null
+
+  // ── Load and validate manifest ────────────────────────────────────
+  const manifestResult = await loadManifest(manifestPath)
+  if (!manifestResult.ok) return null
+
+  const validation = validateManifestForSource(
+    manifestResult.manifest,
+    OPENCODE_SOURCE,
+    { backend: effectiveBackend, dbPath, manifestPath, embedding: config.embedding },
+  )
+  if (!validation.valid) return null
+
+  const sourceEntry = manifestResult.manifest.sources[OPENCODE_SOURCE]
+  if (!sourceEntry) return null
+
+  // ── Create runtime clients ────────────────────────────────────────
+  const embeddingClient = createHttpEmbeddingClient({
+    backend: effectiveBackend,
+    embedding: config.embedding,
+    timeoutMs: config.timeoutMs,
+  })
+  const vectorStore = createLanceDbVectorStore({
+    dbPath,
+    tableName: sourceEntry.table,
+  })
+
+  return { embeddingClient, vectorStore }
+}
+
 function buildEnvInput(
   baseEnv: Record<string, string | undefined> | undefined,
   timeoutMs: number | undefined,
@@ -83,80 +154,12 @@ export async function queryVectorAdapter(
 ): Promise<SearchResult[]> {
   const topK = options.topK ?? 10
 
-  if (options._embeddingClient !== undefined && options._vectorStore !== undefined) {
-    return runVectorQuery(
-      query,
-      topK,
-      options.sessionId,
-      options._embeddingClient,
-      options._vectorStore,
-    )
-  }
+  // 1. Resolve runtime context (test injection or env-based)
+  const ctx = await resolveVectorContext(options)
+  if (!ctx) return []
 
-  const envInput = buildEnvInput(options._env, options.timeoutMs)
-
-  // Resolve vector paths and config via shared resolver.
-  // Precedence: explicit overrides (none here) > env vars > default cache paths.
-  const config = resolveVectorConfig({}, envInput)
-
-  const rawBackend = envInput?.AGENT_VECTOR_DB_BACKEND?.trim()
-  const effectiveBackend = config.backend === "noop" && !rawBackend ? "lancedb" : config.backend
-
-  if (effectiveBackend !== "lancedb") {
-    return []
-  }
-
-  const dbPath = config.indexPath
-  const manifestPath = config.manifestPath
-
-  if (!config.embedding.endpoint) {
-    return []
-  }
-
-  if (!existsSync(dbPath)) {
-    return []
-  }
-
-  const resolvedManifestPath = resolveManifestPath({ ...config, manifestPath, dbPath })
-  if (!resolvedManifestPath) return []
-
-  const manifestResult = await loadManifest(resolvedManifestPath)
-  if (!manifestResult.ok) {
-    return []
-  }
-
-  const validationEnv = {
-    ...config,
-    backend: effectiveBackend,
-    dbPath,
-    manifestPath: resolvedManifestPath,
-  }
-
-  const validation = validateManifestForSource(
-    manifestResult.manifest,
-    OPENCODE_SOURCE,
-    validationEnv,
-  )
-  if (!validation.valid) {
-    return []
-  }
-
-  const sourceEntry = manifestResult.manifest.sources[OPENCODE_SOURCE]
-  if (!sourceEntry) {
-    return []
-  }
-
-  const embeddingClient = createHttpEmbeddingClient({
-    backend: effectiveBackend,
-    embedding: config.embedding,
-    timeoutMs: config.timeoutMs,
-  })
-  const vectorStore = createLanceDbVectorStore({
-    dbPath,
-    tableName: sourceEntry.table,
-  })
-
-  return runVectorQuery(query, topK, options.sessionId, embeddingClient, vectorStore)
+  // 2. Query LanceDB → map vector rows to search results
+  return runVectorQuery(query, topK, options.sessionId, ctx.embeddingClient, ctx.vectorStore)
 }
 
 async function runVectorQuery(
