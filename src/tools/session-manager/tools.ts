@@ -91,11 +91,17 @@ export const session_search: ToolDefinition = tool({
       const resultLimit = args.limit && args.limit > 0 ? args.limit : 20
       if (!args.query.trim()) return formatSearchResults([])
 
+      // Normalize empty/whitespace-only session_id to undefined so both
+      // SQL and vector paths treat it as "no filter" consistently.
+      // Without this, session_id: "" causes the vector adapter to filter
+      // out all results (no session has an empty ID).
+      const sessionID = args.session_id?.trim() || undefined
+
       let sqlResults: SearchResult[] = []
       try {
         sqlResults = searchSessions({
           query: args.query,
-          sessionID: args.session_id,
+          sessionID,
           caseSensitive: args.case_sensitive,
           limit: resultLimit,
         })
@@ -105,7 +111,7 @@ export const session_search: ToolDefinition = tool({
 
       const vectorResults: SearchResult[] = await queryVectorAdapter(args.query, {
         topK: resultLimit * 4,
-        sessionId: args.session_id,
+        sessionId: sessionID,
         timeoutMs: VECTOR_TIMEOUT_MS,
       }).catch(() => [])
 

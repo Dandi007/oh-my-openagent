@@ -332,6 +332,49 @@ describe("session-manager tools", () => {
     }
   })
 
+  test("session_search treats empty session_id as omitted (vector path)", async () => {
+    const fixture = await setupVectorBackend("ses_vector")
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: "/missing/opencode.db" }, async () => {
+        const result = await session_search.execute({ query: "needle", session_id: "", limit: 5 }, mockContext)
+
+        expect(result).toContain("Vector Session")
+        expect(result).toContain("needle from vector backend")
+        expect(result).toContain("[vector]")
+      })
+    } finally {
+      fixture.cleanup()
+    }
+  })
+
+  test("session_search treats whitespace-only session_id as omitted (vector path)", async () => {
+    const fixture = await setupVectorBackend("ses_vector")
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: "/missing/opencode.db" }, async () => {
+        const result = await session_search.execute({ query: "needle", session_id: "   ", limit: 5 }, mockContext)
+
+        expect(result).toContain("Vector Session")
+        expect(result).toContain("needle from vector backend")
+        expect(result).toContain("[vector]")
+      })
+    } finally {
+      fixture.cleanup()
+    }
+  })
+
+  test("session_search non-empty session_id still filters vector results", async () => {
+    const fixture = await setupVectorBackend("ses_target")
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: "/missing/opencode.db" }, async () => {
+        const result = await session_search.execute({ query: "needle", session_id: "ses_other", limit: 5 }, mockContext)
+
+        expect(result).toBe("No matches found.")
+      })
+    } finally {
+      fixture.cleanup()
+    }
+  })
+
   // ── Characterization: hybrid SQL + vector semantics ──────────────
 
   test("CHAR: SQL + vector simultaneous hit — SQL wins dedupe, [vector] only for vector-origin", async () => {
