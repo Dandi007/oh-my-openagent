@@ -1,5 +1,5 @@
 import type { SessionInfo, SessionMessage, SearchResult } from "./types"
-import { getSessionInfo, readSessionMessages } from "./storage"
+import { getSessionInfo } from "./storage"
 
 export async function formatSessionList(sessionIDs: string[]): Promise<string> {
   if (sessionIDs.length === 0) {
@@ -114,12 +114,49 @@ export function formatSearchResults(results: SearchResult[]): string {
 
   for (const result of results) {
     const timestamp = result.timestamp ? new Date(result.timestamp).toISOString() : ""
-    lines.push(`[${result.session_id}] ${result.message_id} (${result.role}) ${timestamp}`)
+    const sourceTag = result.source === "vector" ? " [vector]" : ""
+    const titleInfo = result.title ? ` "${result.title}"` : ""
+    lines.push(
+      `[${result.session_id}]${titleInfo} ${result.message_id} (${result.role})${sourceTag} ${timestamp}`,
+    )
     lines.push(`  ${result.excerpt}`)
-    lines.push(`  Matches: ${result.match_count}\n`)
+    if (result.match_count > 0) {
+      lines.push(`  Matches: ${result.match_count}`)
+    }
+    if (result.match_type.length > 0) {
+      lines.push(`  Type: ${result.match_type.join(", ")}`)
+    }
+    lines.push(`  Score: ${result.score.toFixed(2)}\n`)
   }
 
   return lines.join("\n")
+}
+
+export function mergeAndDedupeSearchResults(
+  sqlResults: SearchResult[],
+  vectorResults: SearchResult[],
+  limit: number,
+): SearchResult[] {
+  const seen = new Set<string>()
+  const merged: SearchResult[] = []
+
+  for (const r of sqlResults) {
+    const key = `${r.session_id}:${r.message_id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(r)
+  }
+
+  for (const r of vectorResults) {
+    const key = `${r.session_id}:${r.message_id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(r)
+  }
+
+  merged.sort((a, b) => b.score - a.score)
+
+  return merged.slice(0, limit)
 }
 
 export async function filterSessionsByDate(
@@ -141,58 +178,6 @@ export async function filterSessionsByDate(
     if (to && info.last_message > to) continue
 
     results.push(id)
-  }
-
-  return results
-}
-
-export async function searchInSession(
-  sessionID: string,
-  query: string,
-  caseSensitive = false,
-  maxResults?: number
-): Promise<SearchResult[]> {
-  const messages = await readSessionMessages(sessionID)
-  const results: SearchResult[] = []
-
-  const searchQuery = caseSensitive ? query : query.toLowerCase()
-
-  for (const msg of messages) {
-    if (maxResults && results.length >= maxResults) break
-
-    let matchCount = 0
-    const excerpts: string[] = []
-
-    for (const part of msg.parts) {
-      if (part.type === "text" && part.text) {
-        const text = caseSensitive ? part.text : part.text.toLowerCase()
-        const matches = text.split(searchQuery).length - 1
-        if (matches > 0) {
-          matchCount += matches
-
-          const index = text.indexOf(searchQuery)
-          if (index !== -1) {
-            const start = Math.max(0, index - 50)
-            const end = Math.min(text.length, index + searchQuery.length + 50)
-            let excerpt = part.text.substring(start, end)
-            if (start > 0) excerpt = "..." + excerpt
-            if (end < text.length) excerpt = excerpt + "..."
-            excerpts.push(excerpt)
-          }
-        }
-      }
-    }
-
-    if (matchCount > 0) {
-      results.push({
-        session_id: sessionID,
-        message_id: msg.id,
-        role: msg.role,
-        excerpt: excerpts[0] || "",
-        match_count: matchCount,
-        timestamp: msg.time?.created,
-      })
-    }
   }
 
   return results

@@ -5,7 +5,7 @@ import {
   formatSessionInfo,
   formatSearchResults,
   filterSessionsByDate,
-  searchInSession,
+  mergeAndDedupeSearchResults,
 } from "./utils"
 import type { SessionInfo, SessionMessage, SearchResult } from "./types"
 
@@ -120,6 +120,10 @@ describe("session-manager utils", () => {
         excerpt: "...example text...",
         match_count: 3,
         timestamp: Date.now(),
+        match_type: ["text"],
+        source: "sql",
+        title: "Test Session",
+        score: 0.8,
       },
     ]
 
@@ -145,16 +149,194 @@ describe("session-manager utils", () => {
     expect(Array.isArray(result)).toBe(true)
   })
 
-  test("searchInSession finds matches case-insensitively", async () => {
+  test("mergeAndDedupeSearchResults deduplicates SQL and vector hits by message", () => {
     // #given
-    const sessionID = "ses_nonexistent"
-    const query = "test"
+    const sqlResult: SearchResult = {
+      session_id: "ses_test123",
+      message_id: "msg_001",
+      role: "user",
+      excerpt: "exact match",
+      match_count: 2,
+      match_type: ["text"],
+      source: "sql",
+      title: "Test Session",
+      score: 0.9,
+    }
+    const duplicateVector: SearchResult = {
+      ...sqlResult,
+      excerpt: "semantic duplicate",
+      source: "vector",
+      score: 0.95,
+    }
 
     // #when
-    const results = await searchInSession(sessionID, query, false)
+    const results = mergeAndDedupeSearchResults([sqlResult], [duplicateVector], 10)
 
     // #then
-    expect(Array.isArray(results)).toBe(true)
-    expect(results.length).toBe(0)
+    expect(results).toHaveLength(1)
+    expect(results[0].source).toBe("sql")
+  })
+
+  test("mergeAndDedupeSearchResults sorts by normalized score and applies limit", () => {
+    // #given
+    const lowScoreSql: SearchResult = {
+      session_id: "ses_a",
+      message_id: "msg_a",
+      role: "user",
+      excerpt: "low",
+      match_count: 1,
+      match_type: ["data"],
+      source: "sql",
+      title: "A",
+      score: 0.55,
+    }
+    const highScoreVector: SearchResult = {
+      session_id: "ses_a",
+      message_id: "msg_b",
+      role: "assistant",
+      excerpt: "high",
+      match_count: 1,
+      match_type: ["semantic"],
+      source: "vector",
+      title: "A",
+      score: 0.8,
+    }
+
+    // #when
+    const results = mergeAndDedupeSearchResults([lowScoreSql], [highScoreVector], 1)
+
+    // #then
+    expect(results).toHaveLength(1)
+    expect(results[0].message_id).toBe("msg_b")
+  })
+
+  // ── Characterization: hybrid merge semantics ─────────────────────
+
+  test("CHAR: SQL wins over vector for same session_id:message_id regardless of score", () => {
+    // #given — SQL has lower score but same key
+    const sqlResult: SearchResult = {
+      session_id: "ses_x",
+      message_id: "msg_x",
+      role: "user",
+      excerpt: "sql match",
+      match_count: 2,
+      match_type: ["text"],
+      source: "sql",
+      title: "Test",
+      score: 0.3,
+    }
+    const vectorResult: SearchResult = {
+      session_id: "ses_x",
+      message_id: "msg_x",
+      role: "user",
+      excerpt: "vector match",
+      match_count: 1,
+      match_type: ["semantic"],
+      source: "vector",
+      title: "Test",
+      score: 0.99,
+    }
+
+    // #when
+    const results = mergeAndDedupeSearchResults([sqlResult], [vectorResult], 10)
+
+    // #then — SQL wins dedupe even with lower score
+    expect(results).toHaveLength(1)
+    expect(results[0].source).toBe("sql")
+    expect(results[0].excerpt).toBe("sql match")
+  })
+
+  test("CHAR: merge preserves distinct messages from both sources", () => {
+    // #given
+    const sqlOnly: SearchResult = {
+      session_id: "ses_a",
+      message_id: "msg_sql_only",
+      role: "user",
+      excerpt: "sql only",
+      match_count: 1,
+      match_type: ["text"],
+      source: "sql",
+      title: "A",
+      score: 0.7,
+    }
+    const vectorOnly: SearchResult = {
+      session_id: "ses_b",
+      message_id: "msg_vec_only",
+      role: "assistant",
+      excerpt: "vector only",
+      match_count: 1,
+      match_type: ["semantic"],
+      source: "vector",
+      title: "B",
+      score: 0.6,
+    }
+
+    // #when
+    const results = mergeAndDedupeSearchResults([sqlOnly], [vectorOnly], 10)
+
+    // #then — both distinct messages preserved
+    expect(results).toHaveLength(2)
+    const sources = results.map((r) => r.source).sort()
+    expect(sources).toEqual(["sql", "vector"])
+  })
+
+  test("CHAR: merge truncates to limit after dedupe and sort", () => {
+    // #given — 4 results, limit 2
+    const r1: SearchResult = {
+      session_id: "ses_1", message_id: "msg_1", role: "user",
+      excerpt: "r1", match_count: 1, match_type: ["text"],
+      source: "sql", title: "S1", score: 0.9,
+    }
+    const r2: SearchResult = {
+      session_id: "ses_2", message_id: "msg_2", role: "user",
+      excerpt: "r2", match_count: 1, match_type: ["text"],
+      source: "sql", title: "S2", score: 0.8,
+    }
+    const r3: SearchResult = {
+      session_id: "ses_3", message_id: "msg_3", role: "assistant",
+      excerpt: "r3", match_count: 1, match_type: ["semantic"],
+      source: "vector", title: "S3", score: 0.7,
+    }
+    const r4: SearchResult = {
+      session_id: "ses_4", message_id: "msg_4", role: "assistant",
+      excerpt: "r4", match_count: 1, match_type: ["semantic"],
+      source: "vector", title: "S4", score: 0.6,
+    }
+
+    // #when
+    const results = mergeAndDedupeSearchResults([r1, r2], [r3, r4], 2)
+
+    // #then — only top 2 by score
+    expect(results).toHaveLength(2)
+    expect(results[0].message_id).toBe("msg_1")
+    expect(results[1].message_id).toBe("msg_2")
+  })
+
+  test("CHAR: formatSearchResults tags vector-origin results with [vector]", () => {
+    // #given
+    const sqlResult: SearchResult = {
+      session_id: "ses_s", message_id: "msg_s", role: "user",
+      excerpt: "sql excerpt", match_count: 1, match_type: ["text"],
+      source: "sql", title: "SQL", score: 0.9, timestamp: Date.now(),
+    }
+    const vectorResult: SearchResult = {
+      session_id: "ses_v", message_id: "msg_v", role: "assistant",
+      excerpt: "vector excerpt", match_count: 1, match_type: ["semantic"],
+      source: "vector", title: "Vector", score: 0.8, timestamp: Date.now(),
+    }
+
+    // #when
+    const result = formatSearchResults([sqlResult, vectorResult])
+
+    // #then
+    expect(result).toContain("Found 2 matches")
+    // SQL result must NOT have [vector]
+    const sqlLine = result.split("\n").find((l) => l.includes("msg_s"))
+    expect(sqlLine).toBeDefined()
+    expect(sqlLine!).not.toContain("[vector]")
+    // Vector result MUST have [vector]
+    const vecLine = result.split("\n").find((l) => l.includes("msg_v"))
+    expect(vecLine).toBeDefined()
+    expect(vecLine!).toContain("[vector]")
   })
 })

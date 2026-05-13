@@ -5,26 +5,20 @@ import {
   SESSION_SEARCH_DESCRIPTION,
   SESSION_INFO_DESCRIPTION,
 } from "./constants"
-import { getAllSessions, getMainSessions, getSessionInfo, readSessionMessages, readSessionTodos, sessionExists } from "./storage"
+import { getMainSessions, getSessionInfo, readSessionMessages, readSessionTodos, sessionExists } from "./storage"
 import {
   filterSessionsByDate,
   formatSessionInfo,
   formatSessionList,
   formatSessionMessages,
   formatSearchResults,
-  searchInSession,
+  mergeAndDedupeSearchResults,
 } from "./utils"
+import { searchSessions } from "./sql-search"
+import { queryVectorAdapter } from "./vector-adapter"
 import type { SessionListArgs, SessionReadArgs, SessionSearchArgs, SessionInfoArgs, SearchResult } from "./types"
 
-const SEARCH_TIMEOUT_MS = 60_000
-const MAX_SESSIONS_TO_SCAN = 50
-
-function withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${operation} timed out after ${ms}ms`)), ms)),
-  ])
-}
+const VECTOR_TIMEOUT_MS = 10_000
 
 export const session_list: ToolDefinition = tool({
   description: SESSION_LIST_DESCRIPTION,
@@ -95,30 +89,39 @@ export const session_search: ToolDefinition = tool({
   execute: async (args: SessionSearchArgs, _context) => {
     try {
       const resultLimit = args.limit && args.limit > 0 ? args.limit : 20
+      if (!args.query.trim()) return formatSearchResults([])
 
-      const searchOperation = async (): Promise<SearchResult[]> => {
-        if (args.session_id) {
-          return searchInSession(args.session_id, args.query, args.case_sensitive, resultLimit)
-        }
+      // Normalize empty/whitespace-only session_id to undefined so both
+      // SQL and vector paths treat it as "no filter" consistently.
+      // Without this, session_id: "" causes the vector adapter to filter
+      // out all results (no session has an empty ID).
+      const sessionID = args.session_id?.trim() || undefined
 
-        const allSessions = await getAllSessions()
-        const sessionsToScan = allSessions.slice(0, MAX_SESSIONS_TO_SCAN)
-
-        const allResults: SearchResult[] = []
-        for (const sid of sessionsToScan) {
-          if (allResults.length >= resultLimit) break
-
-          const remaining = resultLimit - allResults.length
-          const sessionResults = await searchInSession(sid, args.query, args.case_sensitive, remaining)
-          allResults.push(...sessionResults)
-        }
-
-        return allResults.slice(0, resultLimit)
+      let sqlResults: SearchResult[] = []
+      try {
+        sqlResults = searchSessions({
+          query: args.query,
+          sessionID,
+          caseSensitive: args.case_sensitive,
+          limit: resultLimit,
+        })
+      } catch {
+        sqlResults = []
       }
 
-      const results = await withTimeout(searchOperation(), SEARCH_TIMEOUT_MS, "Search")
+      const vectorResults: SearchResult[] = await queryVectorAdapter(args.query, {
+        topK: resultLimit * 4,
+        sessionId: sessionID,
+        timeoutMs: VECTOR_TIMEOUT_MS,
+      }).catch(() => [])
 
-      return formatSearchResults(results)
+      const merged = mergeAndDedupeSearchResults(sqlResults, vectorResults, resultLimit)
+
+      if (merged.length === 0) {
+        return "No matches found."
+      }
+
+      return formatSearchResults(merged)
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}`
     }

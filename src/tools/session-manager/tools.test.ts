@@ -1,12 +1,179 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, beforeAll, afterAll } from "bun:test"
+import { Database } from "bun:sqlite"
+import { existsSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { session_list, session_read, session_search, session_info } from "./tools"
 import type { ToolContext } from "@opencode-ai/plugin/tool"
+import { createLanceDbVectorStore } from "../../shared/vector-runtime/lancedb-adapter"
+
+// Snapshot the real fetch at module-load time so the embedding server
+// works even when other test files leave globalThis.fetch mocked.
+const _realFetch = globalThis.fetch
+
+const FIXED_VECTOR = [0.1, 0.2, 0.3, 0.4]
+
+let embeddingServer: ReturnType<typeof Bun.serve> | null = null
+let embeddingEndpoint = ""
+
+beforeAll(() => {
+  embeddingServer = Bun.serve({
+    port: 0,
+    fetch(_req) {
+      return new Response(
+        JSON.stringify({
+          data: [{ embedding: FIXED_VECTOR, index: 0 }],
+          model: "test-model",
+          usage: { prompt_tokens: 1, total_tokens: 1 },
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      )
+    },
+  })
+  embeddingEndpoint = `http://localhost:${embeddingServer.port}/v1/embeddings`
+})
+
+afterAll(() => {
+  if (embeddingServer) {
+    embeddingServer.stop()
+  }
+})
 
 const mockContext: ToolContext = {
   sessionID: "test-session",
   messageID: "test-message",
   agent: "test-agent",
   abort: new AbortController().signal,
+}
+
+function withEnv<T>(values: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
+  const previous: Record<string, string | undefined> = {}
+  for (const key of Object.keys(values)) {
+    previous[key] = process.env[key]
+    const value = values[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  return run().finally(() => {
+    for (const key of Object.keys(values)) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+}
+
+function createSearchDB(): string {
+  const dbPath = join(tmpdir(), `omo-tools-search-${Date.now()}-${Math.random().toString(36).slice(2)}.db`)
+  const db = new Database(dbPath)
+  db.run("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL)")
+  db.run("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL)")
+  db.run("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, data TEXT NOT NULL)")
+  db.run("INSERT INTO session (id, title) VALUES (?, ?)", ["ses_sql", "SQL Session"])
+  db.run("INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)", ["msg_sql", "ses_sql", Date.now(), JSON.stringify({ role: "user" })])
+  db.run("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)", ["prt_sql", "msg_sql", "ses_sql", JSON.stringify({ type: "text", text: "needle from SQL backend" })])
+  db.close()
+  return dbPath
+}
+
+function createSearchDBWithSession(sessionID: string, messageID: string, title: string, text: string): string {
+  const dbPath = join(tmpdir(), `omo-tools-search-${Date.now()}-${Math.random().toString(36).slice(2)}.db`)
+  const db = new Database(dbPath)
+  db.run("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL)")
+  db.run("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL)")
+  db.run("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, data TEXT NOT NULL)")
+  db.run("INSERT INTO session (id, title) VALUES (?, ?)", [sessionID, title])
+  db.run("INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)", [messageID, sessionID, Date.now(), JSON.stringify({ role: "user" })])
+  db.run("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)", [`prt_${messageID}`, messageID, sessionID, JSON.stringify({ type: "text", text })])
+  db.close()
+  return dbPath
+}
+
+interface VectorBackendFixture {
+  env: Record<string, string>
+  cleanup: () => void
+}
+
+async function setupVectorBackend(sessionID: string): Promise<VectorBackendFixture> {
+  return setupVectorBackendWithMessage(sessionID, "msg_vector", "needle from vector backend")
+}
+
+async function setupVectorBackendWithMessage(
+  sessionID: string,
+  messageID: string,
+  text: string,
+): Promise<VectorBackendFixture> {
+  const tmpDir = join(tmpdir(), `omo-tools-vector-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  mkdirSync(tmpDir, { recursive: true })
+
+  const dbPath = join(tmpDir, "lancedb")
+  const manifestPath = join(tmpDir, "manifest.json")
+
+  const manifest = {
+    contract_version: "vector-runtime/v1",
+    backend: "lancedb",
+    db_path: dbPath,
+    embedding: {
+      provider: "http",
+      endpoint: embeddingEndpoint,
+      model: "test-model",
+      dimensions: 4,
+    },
+    sources: {
+      opencode: {
+        table: "opencode_sessions",
+        schema_version: "opencode-session-chunk/v1",
+        source_of_truth: "database",
+        last_indexed_at: new Date().toISOString(),
+        sessions: 1,
+        messages: 1,
+        parts: 0,
+        chunks: 1,
+        source_bytes: 128,
+        source_sha256: "a".repeat(64),
+      },
+    },
+  }
+  writeFileSync(manifestPath, JSON.stringify(manifest))
+
+  const store = createLanceDbVectorStore({ dbPath, tableName: "opencode_sessions" })
+  await store.upsertChunks([
+    {
+      source: "opencode",
+      chunk_id: `opencode:${sessionID}:${messageID}:prt_vector:hash_vector`,
+      text,
+      metadata: {
+        session_id: sessionID,
+        message_id: messageID,
+        role: "assistant",
+        session_title: "Vector Session",
+        session_time_created: Date.now(),
+        message_time_created: Date.now(),
+      },
+      schema_version: "opencode-session-chunk/v1",
+      chunk_hash: "hash_vector",
+      embedding: FIXED_VECTOR,
+      updated_at: new Date().toISOString(),
+    },
+  ])
+
+  return {
+    env: {
+      AGENT_VECTOR_DB_BACKEND: "lancedb",
+      AGENT_VECTOR_DB_PATH: dbPath,
+      AGENT_VECTOR_MANIFEST: manifestPath,
+      AGENT_EMBEDDING_ENDPOINT: embeddingEndpoint,
+      AGENT_EMBEDDING_MODEL: "test-model",
+      AGENT_EMBEDDING_DIMENSIONS: "4",
+    },
+    cleanup: () => {
+      rmSync(tmpDir, { recursive: true, force: true })
+    },
+  }
+}
+
+function removeIfExists(path: string): void {
+  if (existsSync(path)) unlinkSync(path)
 }
 
 describe("session-manager tools", () => {
@@ -109,6 +276,215 @@ describe("session-manager tools", () => {
     
     expect(typeof result).toBe("string")
   })
+
+  test("session_search returns no matches for empty query before calling adapters", async () => {
+    const result = await session_search.execute({ query: "   ", limit: 5 }, mockContext)
+
+    expect(result).toBe("No matches found.")
+  })
+
+  test("session_search uses SQL backend when vector adapter is absent", async () => {
+    const dbPath = createSearchDB()
+    try {
+      await withEnv({ OPENCODE_DB: dbPath }, async () => {
+        const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
+
+        expect(result).toContain("SQL Session")
+        expect(result).toContain("needle from SQL backend")
+      })
+    } finally {
+      removeIfExists(dbPath)
+    }
+  })
+
+  test("session_search falls back to vector backend when SQL schema is unavailable", async () => {
+    // Restore real fetch in case another test file left it mocked
+    if (typeof _realFetch === "function") globalThis.fetch = _realFetch
+    const dbPath = join(tmpdir(), `omo-tools-bad-schema-${Date.now()}.db`)
+    const db = new Database(dbPath)
+    db.run("CREATE TABLE unrelated (id TEXT)")
+    db.close()
+    const fixture = await setupVectorBackend("ses_vector")
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: dbPath }, async () => {
+        const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
+
+        expect(result).toContain("Vector Session")
+        expect(result).toContain("needle from vector backend")
+        expect(result).toContain("[vector]")
+      })
+    } finally {
+      removeIfExists(dbPath)
+      fixture.cleanup()
+    }
+  })
+
+  test("session_search applies session_id filter to vector results", async () => {
+    const fixture = await setupVectorBackend("ses_target")
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: "/missing/opencode.db" }, async () => {
+        const result = await session_search.execute({ query: "needle", session_id: "ses_other", limit: 5 }, mockContext)
+
+        expect(result).toBe("No matches found.")
+      })
+    } finally {
+      fixture.cleanup()
+    }
+  })
+
+  test("session_search treats empty session_id as omitted (vector path)", async () => {
+    const fixture = await setupVectorBackend("ses_vector")
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: "/missing/opencode.db" }, async () => {
+        const result = await session_search.execute({ query: "needle", session_id: "", limit: 5 }, mockContext)
+
+        expect(result).toContain("Vector Session")
+        expect(result).toContain("needle from vector backend")
+        expect(result).toContain("[vector]")
+      })
+    } finally {
+      fixture.cleanup()
+    }
+  })
+
+  test("session_search treats whitespace-only session_id as omitted (vector path)", async () => {
+    const fixture = await setupVectorBackend("ses_vector")
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: "/missing/opencode.db" }, async () => {
+        const result = await session_search.execute({ query: "needle", session_id: "   ", limit: 5 }, mockContext)
+
+        expect(result).toContain("Vector Session")
+        expect(result).toContain("needle from vector backend")
+        expect(result).toContain("[vector]")
+      })
+    } finally {
+      fixture.cleanup()
+    }
+  })
+
+  test("session_search non-empty session_id still filters vector results", async () => {
+    const fixture = await setupVectorBackend("ses_target")
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: "/missing/opencode.db" }, async () => {
+        const result = await session_search.execute({ query: "needle", session_id: "ses_other", limit: 5 }, mockContext)
+
+        expect(result).toBe("No matches found.")
+      })
+    } finally {
+      fixture.cleanup()
+    }
+  })
+
+  // ── Characterization: hybrid SQL + vector semantics ──────────────
+
+  test("CHAR: SQL + vector simultaneous hit — SQL wins dedupe, [vector] only for vector-origin", async () => {
+    // Restore real fetch in case another test file left it mocked
+    if (typeof _realFetch === "function") globalThis.fetch = _realFetch
+
+    const sharedSessionID = "ses_hybrid"
+    const sharedMessageID = "msg_hybrid"
+
+    // SQL DB with same session_id:message_id as vector
+    const dbPath = createSearchDBWithSession(
+      sharedSessionID,
+      sharedMessageID,
+      "Hybrid SQL Session",
+      "needle from SQL backend wins",
+    )
+    // Vector backend with same session_id:message_id
+    const fixture = await setupVectorBackendWithMessage(
+      sharedSessionID,
+      sharedMessageID,
+      "needle from vector backend loses",
+    )
+
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: dbPath }, async () => {
+        const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
+
+        // SQL result wins dedupe — source is sql, not vector
+        expect(result).toContain("Hybrid SQL Session")
+        expect(result).toContain("needle from SQL backend wins")
+        // Vector duplicate must NOT appear (deduped by session_id:message_id)
+        expect(result).not.toContain("needle from vector backend loses")
+        // SQL-origin result must NOT have [vector] tag
+        expect(result).not.toContain("[vector]")
+        // Only one result (deduped)
+        expect(result).toContain("Found 1 matches")
+      })
+    } finally {
+      removeIfExists(dbPath)
+      fixture.cleanup()
+    }
+  })
+
+  test("CHAR: SQL-empty + vector-positive returns vector result with [vector] tag", async () => {
+    // Restore real fetch in case another test file left it mocked
+    if (typeof _realFetch === "function") globalThis.fetch = _realFetch
+
+    // SQL DB with no matching "needle" text
+    const dbPath = createSearchDBWithSession(
+      "ses_empty_sql",
+      "msg_empty",
+      "Empty SQL Session",
+      "no match here at all",
+    )
+    // Vector backend with matching result
+    const fixture = await setupVectorBackend("ses_vector_only")
+
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: dbPath }, async () => {
+        const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
+
+        // Vector result is returned
+        expect(result).toContain("Vector Session")
+        expect(result).toContain("needle from vector backend")
+        // Must have [vector] tag for vector-origin result
+        expect(result).toContain("[vector]")
+        // SQL result must NOT appear
+        expect(result).not.toContain("Empty SQL Session")
+      })
+    } finally {
+      removeIfExists(dbPath)
+      fixture.cleanup()
+    }
+  })
+
+  test("CHAR: hybrid merge respects limit truncation", async () => {
+    // Restore real fetch in case another test file left it mocked
+    if (typeof _realFetch === "function") globalThis.fetch = _realFetch
+
+    // SQL DB with one matching result
+    const dbPath = createSearchDBWithSession(
+      "ses_limit_sql",
+      "msg_limit_sql",
+      "SQL Limit Session",
+      "needle from SQL for limit test",
+    )
+    // Vector backend with a different matching result
+    const fixture = await setupVectorBackendWithMessage(
+      "ses_limit_vec",
+      "msg_limit_vec",
+      "needle from vector for limit test",
+    )
+
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: dbPath }, async () => {
+        // limit=1 should truncate to exactly 1 result (highest score wins)
+        const result = await session_search.execute({ query: "needle", limit: 1 }, mockContext)
+
+        expect(result).toContain("Found 1 matches")
+        // Only one result appears — limit truncation works
+        const matchCount = (result.match(/\[ses_/g) || []).length
+        expect(matchCount).toBe(1)
+      })
+    } finally {
+      removeIfExists(dbPath)
+      fixture.cleanup()
+    }
+  })
+
+  // ── session_info tests ───────────────────────────────────────────
 
   test("session_info handles non-existent session", async () => {
     const result = await session_info.execute({ session_id: "ses_nonexistent" }, mockContext)
