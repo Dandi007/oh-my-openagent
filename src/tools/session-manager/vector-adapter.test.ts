@@ -687,5 +687,268 @@ describe("vector-adapter", () => {
 
       expect(results.length).toBe(1)
     })
+
+    // ── Characterization: invalid manifest degradation ─────────────
+
+    test("CHAR: malformed JSON manifest returns empty array without creating files", async () => {
+      const tmpDir = join(tmpdir(), `omo-vec-adapter-bad-json-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      mkdirSync(tmpDir, { recursive: true })
+
+      const manifestPath = join(tmpDir, "manifest.json")
+      const dbPath = join(tmpDir, "lancedb")
+      mkdirSync(dbPath, { recursive: true })
+
+      // Write malformed JSON
+      writeFileSync(manifestPath, "{ not valid json at all !!!")
+
+      try {
+        const results = await queryVectorAdapter("test query", {
+          _env: {
+            AGENT_VECTOR_DB_BACKEND: "lancedb",
+            AGENT_VECTOR_DB_PATH: dbPath,
+            AGENT_VECTOR_MANIFEST: manifestPath,
+            AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
+            AGENT_EMBEDDING_MODEL: "test-model",
+            AGENT_EMBEDDING_DIMENSIONS: "4",
+          },
+        })
+
+        expect(results).toEqual([])
+        // No new files should be created beyond what we set up
+        expect(existsSync(manifestPath)).toBe(true) // still exists
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
+
+    test("CHAR: schema-invalid manifest (missing required fields) returns empty array", async () => {
+      const tmpDir = join(tmpdir(), `omo-vec-adapter-bad-schema-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      mkdirSync(tmpDir, { recursive: true })
+
+      const manifestPath = join(tmpDir, "manifest.json")
+      const dbPath = join(tmpDir, "lancedb")
+      mkdirSync(dbPath, { recursive: true })
+
+      // Valid JSON but missing required fields (no sources, no embedding.model)
+      const badManifest = {
+        contract_version: "vector-runtime/v1",
+        backend: "lancedb",
+        db_path: dbPath,
+        // missing embedding
+        // missing sources
+      }
+      writeFileSync(manifestPath, JSON.stringify(badManifest))
+
+      try {
+        const results = await queryVectorAdapter("test query", {
+          _env: {
+            AGENT_VECTOR_DB_BACKEND: "lancedb",
+            AGENT_VECTOR_DB_PATH: dbPath,
+            AGENT_VECTOR_MANIFEST: manifestPath,
+            AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
+            AGENT_EMBEDDING_MODEL: "test-model",
+            AGENT_EMBEDDING_DIMENSIONS: "4",
+          },
+        })
+
+        expect(results).toEqual([])
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
+
+    test("CHAR: manifest with invalid source_sha256 (checksum mismatch) returns empty array", async () => {
+      const tmpDir = join(tmpdir(), `omo-vec-adapter-bad-sha-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      mkdirSync(tmpDir, { recursive: true })
+
+      const manifestPath = join(tmpDir, "manifest.json")
+      const dbPath = join(tmpDir, "lancedb")
+      mkdirSync(dbPath, { recursive: true })
+
+      // Valid structure but source_sha256 is not a valid SHA-256 hex digest
+      const badManifest = {
+        contract_version: "vector-runtime/v1",
+        backend: "lancedb",
+        db_path: dbPath,
+        embedding: {
+          provider: "http",
+          endpoint: "http://localhost:9999/v1/embeddings",
+          model: "test-model",
+          dimensions: 4,
+        },
+        sources: {
+          opencode: {
+            table: "opencode_sessions",
+            schema_version: "opencode-session-chunk/v1",
+            source_of_truth: "database",
+            last_indexed_at: new Date().toISOString(),
+            sessions: 1,
+            messages: 1,
+            parts: 0,
+            chunks: 1,
+            source_bytes: 128,
+            source_sha256: "not-a-valid-sha256!!!",
+          },
+        },
+      }
+      writeFileSync(manifestPath, JSON.stringify(badManifest))
+
+      try {
+        const results = await queryVectorAdapter("test query", {
+          _env: {
+            AGENT_VECTOR_DB_BACKEND: "lancedb",
+            AGENT_VECTOR_DB_PATH: dbPath,
+            AGENT_VECTOR_MANIFEST: manifestPath,
+            AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
+            AGENT_EMBEDDING_MODEL: "test-model",
+            AGENT_EMBEDDING_DIMENSIONS: "4",
+          },
+        })
+
+        expect(results).toEqual([])
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
+
+    test("CHAR: manifest missing opencode source namespace returns empty array", async () => {
+      const tmpDir = join(tmpdir(), `omo-vec-adapter-no-source-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      mkdirSync(tmpDir, { recursive: true })
+
+      const manifestPath = join(tmpDir, "manifest.json")
+      const dbPath = join(tmpDir, "lancedb")
+      mkdirSync(dbPath, { recursive: true })
+
+      // Valid manifest but no "opencode" source namespace
+      const badManifest = {
+        contract_version: "vector-runtime/v1",
+        backend: "lancedb",
+        db_path: dbPath,
+        embedding: {
+          provider: "http",
+          endpoint: "http://localhost:9999/v1/embeddings",
+          model: "test-model",
+          dimensions: 4,
+        },
+        sources: {
+          markdown: {
+            table: "markdown_notes",
+            schema_version: "note-chunk/v1",
+            source_of_truth: "external-system",
+            last_indexed_at: new Date().toISOString(),
+            sessions: 0,
+            messages: 0,
+            parts: 0,
+            chunks: 5,
+            source_bytes: 256,
+            source_sha256: "a".repeat(64),
+          },
+        },
+      }
+      writeFileSync(manifestPath, JSON.stringify(badManifest))
+
+      try {
+        const results = await queryVectorAdapter("test query", {
+          _env: {
+            AGENT_VECTOR_DB_BACKEND: "lancedb",
+            AGENT_VECTOR_DB_PATH: dbPath,
+            AGENT_VECTOR_MANIFEST: manifestPath,
+            AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
+            AGENT_EMBEDDING_MODEL: "test-model",
+            AGENT_EMBEDDING_DIMENSIONS: "4",
+          },
+        })
+
+        expect(results).toEqual([])
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
+
+    test("CHAR: manifest with backend mismatch returns empty array", async () => {
+      const tmpDir = join(tmpdir(), `omo-vec-adapter-backend-mismatch-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      mkdirSync(tmpDir, { recursive: true })
+
+      const manifestPath = join(tmpDir, "manifest.json")
+      const dbPath = join(tmpDir, "lancedb")
+      mkdirSync(dbPath, { recursive: true })
+
+      // Manifest says qdrant but env says lancedb
+      const badManifest = {
+        contract_version: "vector-runtime/v1",
+        backend: "qdrant",
+        db_path: dbPath,
+        embedding: {
+          provider: "http",
+          endpoint: "http://localhost:9999/v1/embeddings",
+          model: "test-model",
+          dimensions: 4,
+        },
+        sources: {
+          opencode: {
+            table: "opencode_sessions",
+            schema_version: "opencode-session-chunk/v1",
+            source_of_truth: "database",
+            last_indexed_at: new Date().toISOString(),
+            sessions: 1,
+            messages: 1,
+            parts: 0,
+            chunks: 1,
+            source_bytes: 128,
+            source_sha256: "a".repeat(64),
+          },
+        },
+      }
+      writeFileSync(manifestPath, JSON.stringify(badManifest))
+
+      try {
+        const results = await queryVectorAdapter("test query", {
+          _env: {
+            AGENT_VECTOR_DB_BACKEND: "lancedb",
+            AGENT_VECTOR_DB_PATH: dbPath,
+            AGENT_VECTOR_MANIFEST: manifestPath,
+            AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
+            AGENT_EMBEDDING_MODEL: "test-model",
+            AGENT_EMBEDDING_DIMENSIONS: "4",
+          },
+        })
+
+        expect(results).toEqual([])
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
+
+    test("CHAR: missing index/manifest leaves paths absent after query", async () => {
+      const tmpDir = join(tmpdir(), `omo-vec-adapter-missing-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      mkdirSync(tmpDir, { recursive: true })
+
+      const missingDbPath = join(tmpDir, "nonexistent-lancedb")
+      const missingManifestPath = join(tmpDir, "nonexistent-manifest.json")
+
+      // Neither path exists
+      expect(existsSync(missingDbPath)).toBe(false)
+      expect(existsSync(missingManifestPath)).toBe(false)
+
+      try {
+        const results = await queryVectorAdapter("test query", {
+          _env: {
+            AGENT_VECTOR_DB_BACKEND: "lancedb",
+            AGENT_VECTOR_DB_PATH: missingDbPath,
+            AGENT_VECTOR_MANIFEST: missingManifestPath,
+            AGENT_EMBEDDING_ENDPOINT: "http://localhost:9999/v1/embeddings",
+            AGENT_EMBEDDING_MODEL: "test-model",
+            AGENT_EMBEDDING_DIMENSIONS: "4",
+          },
+        })
+
+        expect(results).toEqual([])
+        // Paths must remain absent — no implicit creation
+        expect(existsSync(missingDbPath)).toBe(false)
+        expect(existsSync(missingManifestPath)).toBe(false)
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
   })
 })

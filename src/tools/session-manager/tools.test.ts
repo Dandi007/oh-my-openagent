@@ -76,12 +76,33 @@ function createSearchDB(): string {
   return dbPath
 }
 
+function createSearchDBWithSession(sessionID: string, messageID: string, title: string, text: string): string {
+  const dbPath = join(tmpdir(), `omo-tools-search-${Date.now()}-${Math.random().toString(36).slice(2)}.db`)
+  const db = new Database(dbPath)
+  db.run("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL)")
+  db.run("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL)")
+  db.run("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, data TEXT NOT NULL)")
+  db.run("INSERT INTO session (id, title) VALUES (?, ?)", [sessionID, title])
+  db.run("INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)", [messageID, sessionID, Date.now(), JSON.stringify({ role: "user" })])
+  db.run("INSERT INTO part (id, message_id, session_id, data) VALUES (?, ?, ?, ?)", [`prt_${messageID}`, messageID, sessionID, JSON.stringify({ type: "text", text })])
+  db.close()
+  return dbPath
+}
+
 interface VectorBackendFixture {
   env: Record<string, string>
   cleanup: () => void
 }
 
 async function setupVectorBackend(sessionID: string): Promise<VectorBackendFixture> {
+  return setupVectorBackendWithMessage(sessionID, "msg_vector", "needle from vector backend")
+}
+
+async function setupVectorBackendWithMessage(
+  sessionID: string,
+  messageID: string,
+  text: string,
+): Promise<VectorBackendFixture> {
   const tmpDir = join(tmpdir(), `omo-tools-vector-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   mkdirSync(tmpDir, { recursive: true })
 
@@ -119,11 +140,11 @@ async function setupVectorBackend(sessionID: string): Promise<VectorBackendFixtu
   await store.upsertChunks([
     {
       source: "opencode",
-      chunk_id: `opencode:${sessionID}:msg_vector:prt_vector:hash_vector`,
-      text: "needle from vector backend",
+      chunk_id: `opencode:${sessionID}:${messageID}:prt_vector:hash_vector`,
+      text,
       metadata: {
         session_id: sessionID,
-        message_id: "msg_vector",
+        message_id: messageID,
         role: "assistant",
         session_title: "Vector Session",
         session_time_created: Date.now(),
@@ -310,6 +331,117 @@ describe("session-manager tools", () => {
       fixture.cleanup()
     }
   })
+
+  // ── Characterization: hybrid SQL + vector semantics ──────────────
+
+  test("CHAR: SQL + vector simultaneous hit — SQL wins dedupe, [vector] only for vector-origin", async () => {
+    // Restore real fetch in case another test file left it mocked
+    if (typeof _realFetch === "function") globalThis.fetch = _realFetch
+
+    const sharedSessionID = "ses_hybrid"
+    const sharedMessageID = "msg_hybrid"
+
+    // SQL DB with same session_id:message_id as vector
+    const dbPath = createSearchDBWithSession(
+      sharedSessionID,
+      sharedMessageID,
+      "Hybrid SQL Session",
+      "needle from SQL backend wins",
+    )
+    // Vector backend with same session_id:message_id
+    const fixture = await setupVectorBackendWithMessage(
+      sharedSessionID,
+      sharedMessageID,
+      "needle from vector backend loses",
+    )
+
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: dbPath }, async () => {
+        const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
+
+        // SQL result wins dedupe — source is sql, not vector
+        expect(result).toContain("Hybrid SQL Session")
+        expect(result).toContain("needle from SQL backend wins")
+        // Vector duplicate must NOT appear (deduped by session_id:message_id)
+        expect(result).not.toContain("needle from vector backend loses")
+        // SQL-origin result must NOT have [vector] tag
+        expect(result).not.toContain("[vector]")
+        // Only one result (deduped)
+        expect(result).toContain("Found 1 matches")
+      })
+    } finally {
+      removeIfExists(dbPath)
+      fixture.cleanup()
+    }
+  })
+
+  test("CHAR: SQL-empty + vector-positive returns vector result with [vector] tag", async () => {
+    // Restore real fetch in case another test file left it mocked
+    if (typeof _realFetch === "function") globalThis.fetch = _realFetch
+
+    // SQL DB with no matching "needle" text
+    const dbPath = createSearchDBWithSession(
+      "ses_empty_sql",
+      "msg_empty",
+      "Empty SQL Session",
+      "no match here at all",
+    )
+    // Vector backend with matching result
+    const fixture = await setupVectorBackend("ses_vector_only")
+
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: dbPath }, async () => {
+        const result = await session_search.execute({ query: "needle", limit: 5 }, mockContext)
+
+        // Vector result is returned
+        expect(result).toContain("Vector Session")
+        expect(result).toContain("needle from vector backend")
+        // Must have [vector] tag for vector-origin result
+        expect(result).toContain("[vector]")
+        // SQL result must NOT appear
+        expect(result).not.toContain("Empty SQL Session")
+      })
+    } finally {
+      removeIfExists(dbPath)
+      fixture.cleanup()
+    }
+  })
+
+  test("CHAR: hybrid merge respects limit truncation", async () => {
+    // Restore real fetch in case another test file left it mocked
+    if (typeof _realFetch === "function") globalThis.fetch = _realFetch
+
+    // SQL DB with one matching result
+    const dbPath = createSearchDBWithSession(
+      "ses_limit_sql",
+      "msg_limit_sql",
+      "SQL Limit Session",
+      "needle from SQL for limit test",
+    )
+    // Vector backend with a different matching result
+    const fixture = await setupVectorBackendWithMessage(
+      "ses_limit_vec",
+      "msg_limit_vec",
+      "needle from vector for limit test",
+    )
+
+    try {
+      await withEnv({ ...fixture.env, OPENCODE_DB: dbPath }, async () => {
+        // limit=1 should truncate to exactly 1 result (highest score wins)
+        const result = await session_search.execute({ query: "needle", limit: 1 }, mockContext)
+
+        expect(result).toContain("Found 1 matches")
+        // Only one result appears — limit truncation works
+        const matchCount = (result.match(/\[ses_/g) || []).length
+        expect(matchCount).toBe(1)
+      })
+    } finally {
+      removeIfExists(dbPath)
+      fixture.cleanup()
+    }
+  })
+
+  // ── session_info tests ───────────────────────────────────────────
 
   test("session_info handles non-existent session", async () => {
     const result = await session_info.execute({ session_id: "ses_nonexistent" }, mockContext)
