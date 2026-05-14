@@ -426,6 +426,13 @@ export function readBoulderWork(directory: string, workId: string): BoulderWorkS
  * @returns true on success, false on failure.
  */
 export function writeBoulderWork(directory: string, workId: string, work: BoulderWorkState): boolean {
+  const sessionOriginsMissing = work.session_ids.length > 0
+    && (!work.session_origins || Object.keys(work.session_origins).length === 0)
+  if (sessionOriginsMissing) {
+    console.warn(
+      `[boulder-state] writeBoulderWork: work "${workId}" has ${work.session_ids.length} session(s) but empty session_origins`,
+    )
+  }
   const filePath = join(directory, BOULDER_DIR, `${workId}.json`)
   return atomicWriteJson(filePath, work)
 }
@@ -628,6 +635,22 @@ export function listBoulderWorks(directory: string): BoulderWorkState[] {
   return works
 }
 
+function repairSessionOriginsIfNeeded(directory: string, work: BoulderWorkState): BoulderWorkState {
+  if (work.session_ids.length === 0) return work
+  if (work.session_origins && Object.keys(work.session_origins).length > 0) return work
+
+  const repairedOrigins: Record<string, BoulderSessionOrigin> = {}
+  for (const sid of work.session_ids) {
+    repairedOrigins[sid] = "direct"
+  }
+  const repaired: BoulderWorkState = {
+    ...work,
+    session_origins: repairedOrigins,
+  }
+  writeBoulderWork(directory, work.work_id, repaired)
+  return repaired
+}
+
 /**
  * Find which work a session belongs to.
  *
@@ -643,7 +666,7 @@ export function getWorkForSession(directory: string, sessionId: string): Boulder
     const workId = index.sessions[sessionId]
     if (workId) {
       const work = readBoulderWork(directory, workId)
-      if (work) return work
+      if (work) return repairSessionOriginsIfNeeded(directory, work)
       // Stale index entry — work file missing, fall through to scan
     }
   }
@@ -657,7 +680,15 @@ export function getWorkForSession(directory: string, sessionId: string): Boulder
       return bMs - aMs
     })
 
-  return works[0] ?? null
+  const found = works[0] ?? null
+  if (!found) return null
+
+  if (!index && works.length > 0) {
+    const rebuilt = rebuildIndexFromWorkFiles(directory)
+    writeBoulderIndex(directory, rebuilt)
+  }
+
+  return repairSessionOriginsIfNeeded(directory, found)
 }
 
 /**
@@ -678,7 +709,7 @@ export function getWorkForSessionStrict(
     const workId = index.sessions[sessionId]
     if (workId) {
       const work = readBoulderWork(directory, workId)
-      if (work) return { work, error: null }
+      if (work) return { work: repairSessionOriginsIfNeeded(directory, work), error: null }
       // Stale index entry — work file missing
       return {
         work: null,
@@ -696,7 +727,7 @@ export function getWorkForSessionStrict(
       return bMs - aMs
     })
 
-  if (works[0]) return { work: works[0], error: null }
+  if (works[0]) return { work: repairSessionOriginsIfNeeded(directory, works[0]), error: null }
   return { work: null, error: null }
 }
 

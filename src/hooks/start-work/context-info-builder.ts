@@ -188,7 +188,10 @@ function createNewWorkOrInitialize(params: {
 
   if (!created) {
     const initializedState = createBoulderState(planPath, sessionId, activeAgent, worktreePath)
-    writeBoulderState(directory, initializedState)
+    const written = writeBoulderState(directory, initializedState)
+    if (!written) {
+      log(`[start-work] Failed to write initial boulder state`, { sessionID: sessionId })
+    }
   }
 }
 
