@@ -170,6 +170,13 @@ export function createToolExecuteAfterHandler(input: {
         }
       }
 
+      // Auto-rebuild boulder index when agent writes to .sisyphus/boulder/
+      if (filePath && isSisyphusPath(filePath) && filePath.includes("/boulder/")) {
+        const { rebuildIndexFromWorkFiles, writeBoulderIndex } = await import("../../features/boulder-state")
+        const index = rebuildIndexFromWorkFiles(ctx.directory)
+        writeBoulderIndex(ctx.directory, index)
+      }
+
       if (filePath && !isSisyphusPath(filePath)) {
         toolOutput.output = (toolOutput.output || "") + DIRECT_WORK_REMINDER
         log(`[${HOOK_NAME}] Direct work reminder appended`, {
