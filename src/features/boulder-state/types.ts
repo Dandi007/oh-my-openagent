@@ -3,9 +3,54 @@
  *
  * Manages the active work plan state for Sisyphus orchestrator.
  * Named after Sisyphus's boulder - the eternal task that must be rolled.
+ *
+ * @remarks
+ * v3 (current): BoulderState is a pure container — no mirror fields.
+ *   Work state lives exclusively in BoulderWorkState, stored as individual
+ *   JSON files under .sisyphus/boulder/{work_id}.json.
+ *   Session→work mapping lives in BoulderIndex (.sisyphus/boulder/index.json).
+ *
+ * v2 (legacy): BoulderStateV2 carries mirror fields (active_plan, plan_name,
+ *   status, session_ids, etc.) that duplicate BoulderWorkState fields.
+ *   Preserved for migration compatibility.
  */
 
+// ─── v3 Types (current) ────────────────────────────────────────────
+
+/**
+ * v3 BoulderState — pure container with no mirror fields.
+ *
+ * All work state lives in individual BoulderWorkState files.
+ * The only top-level fields are schema_version and the works registry.
+ */
 export interface BoulderState {
+  schema_version: 3
+  /** Registry of all known works, keyed by work_id */
+  works: Record<string, BoulderWorkState>
+}
+
+/**
+ * v3 BoulderIndex — session→work lookup table.
+ *
+ * Stored at .sisyphus/boulder/index.json.
+ * Provides O(1) lookup from session ID to the work it belongs to.
+ * Can be rebuilt from work files if corrupted.
+ */
+export interface BoulderIndex {
+  schema_version: 3
+  /** sessionID → workID mapping */
+  sessions: Record<string, string>
+}
+
+// ─── v2 Types (legacy, preserved for migration) ────────────────────
+
+/**
+ * v2 BoulderState — legacy format with mirror fields.
+ *
+ * @deprecated Use BoulderState (v3) for new code.
+ *   Preserved for reading v2 boulder.json during migration.
+ */
+export interface BoulderStateV2 {
   schema_version?: 2
   active_work_id?: string
   works?: Record<string, BoulderWorkState>

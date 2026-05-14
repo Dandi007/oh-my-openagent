@@ -13,13 +13,35 @@ import {
   clearBoulderState,
   readBoulderState,
 } from "../../features/boulder-state"
-import type { BoulderState } from "../../features/boulder-state"
+import type { BoulderState, BoulderWorkState } from "../../features/boulder-state"
 import * as sessionState from "../../features/claude-code-session-state"
 import * as worktreeDetector from "./worktree-detector"
 
 describe("start-work hook", () => {
   let testDir: string
   let sisyphusDir: string
+
+  function firstWork(state: BoulderState | null | undefined) {
+    return state ? Object.values(state.works)[0] : undefined
+  }
+
+  function createTestBoulderState(work: Partial<BoulderWorkState> & {
+    active_plan: string
+    started_at: string
+    session_ids: string[]
+    plan_name: string
+  }, workId = "work-1"): BoulderState {
+    return {
+      schema_version: 3,
+      works: {
+        [workId]: {
+          work_id: workId,
+          status: "active",
+          ...work,
+        },
+      },
+    }
+  }
 
   function createMockPluginInput() {
     return {
@@ -151,12 +173,12 @@ You are starting a Sisyphus work session.
       const planPath = join(testDir, "test-plan.md")
       writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [x] Task 2")
 
-      const state: BoulderState = {
+      const state = createTestBoulderState({
         active_plan: planPath,
         started_at: "2026-01-02T10:00:00Z",
         session_ids: ["session-1"],
         plan_name: "test-plan",
-      }
+      })
       writeBoulderState(testDir, state)
 
       const hook = createStartWorkHook(createMockPluginInput())
@@ -692,7 +714,7 @@ You are starting a Sisyphus work session.
       // then
       expect(output.message.agent).toBe("sisyphus")
       expect(sessionState.getSessionAgent("ses-prometheus-to-worker")).toBe("sisyphus")
-      expect(readBoulderState(testDir)?.agent).toBe("sisyphus")
+      expect(firstWork(readBoulderState(testDir))?.agent).toBe("sisyphus")
     })
 
     test("should rewrite stale Prometheus boulder state to Sisyphus when resuming without Atlas", async () => {
@@ -704,13 +726,13 @@ You are starting a Sisyphus work session.
 
       const planPath = join(testDir, "resume-plan.md")
       writeFileSync(planPath, "# Plan\n- [ ] Task 1")
-      writeBoulderState(testDir, {
+      writeBoulderState(testDir, createTestBoulderState({
         active_plan: planPath,
         started_at: "2026-01-02T10:00:00Z",
         session_ids: ["old-session"],
         plan_name: "resume-plan",
         agent: "prometheus",
-      })
+      }))
 
       const hook = createStartWorkHook(createMockPluginInput())
       const output = {
@@ -726,7 +748,7 @@ You are starting a Sisyphus work session.
 
       // then
       expect(output.message.agent).toBe("sisyphus")
-      expect(readBoulderState(testDir)?.agent).toBe("sisyphus")
+      expect(firstWork(readBoulderState(testDir))?.agent).toBe("sisyphus")
     })
 
     test("#given start-work hands the session to Atlas #when Atlas later receives session.idle #then the same session continues the selected plan", async () => {
@@ -761,8 +783,8 @@ You are starting a Sisyphus work session.
 
       // then
       expect(output.message.agent).toBe("atlas")
-      expect(readBoulderState(testDir)?.session_ids).toContain("session-123")
-      expect(readBoulderState(testDir)?.agent).toBe("atlas")
+      expect(firstWork(readBoulderState(testDir))?.session_ids).toContain("session-123")
+      expect(firstWork(readBoulderState(testDir))?.agent).toBe("atlas")
       expect(promptAsyncMock).toHaveBeenCalledTimes(1)
       promptAsyncMock.mockRestore()
     })
@@ -851,8 +873,8 @@ You are starting a Sisyphus work session.
 
         // then
         expect(output.message.agent).toBe("atlas")
-        expect(readBoulderState(testDir)?.session_ids).toContain("session-123")
-        expect(readBoulderState(testDir)?.agent).toBe("atlas")
+        expect(firstWork(readBoulderState(testDir))?.session_ids).toContain("session-123")
+        expect(firstWork(readBoulderState(testDir))?.agent).toBe("atlas")
         expect(promptAsyncMock).toHaveBeenCalledTimes(1)
       } finally {
         globalThis.setTimeout = originalSetTimeout
@@ -933,7 +955,7 @@ You are starting a Sisyphus work session.
 
       // then - boulder.json has worktree_path
       const state = readBoulderState(testDir)
-      expect(state?.worktree_path).toBe("/valid/wt")
+      expect(firstWork(state)?.worktree_path).toBe("/valid/wt")
     })
 
     test("should NOT store worktree_path when --worktree path is invalid", async () => {
@@ -953,7 +975,7 @@ You are starting a Sisyphus work session.
 
       // then - worktree_path absent, setup instructions present
       const state = readBoulderState(testDir)
-      expect(state?.worktree_path).toBeUndefined()
+      expect(firstWork(state)?.worktree_path).toBeUndefined()
       expect(output.parts[0].text).toContain("needs setup")
       expect(output.parts[0].text).toContain("git worktree add /nonexistent/wt")
     })
@@ -962,13 +984,13 @@ You are starting a Sisyphus work session.
       // given - existing boulder with old worktree, user provides new worktree
       const planPath = join(testDir, "plan.md")
       writeFileSync(planPath, "# Plan\n- [ ] Task 1")
-      const existingState: BoulderState = {
+      const existingState: BoulderState = createTestBoulderState({
         active_plan: planPath,
         started_at: "2026-01-01T00:00:00Z",
         session_ids: ["old-session"],
         plan_name: "plan",
         worktree_path: "/old/wt",
-      }
+      })
       writeBoulderState(testDir, existingState)
       detectSpy.mockReturnValue("/new/wt")
 
@@ -982,21 +1004,21 @@ You are starting a Sisyphus work session.
 
       // then - boulder reflects updated worktree and new session appended
       const state = readBoulderState(testDir)
-      expect(state?.worktree_path).toBe("/new/wt")
-      expect(state?.session_ids).toContain("session-456")
+      expect(firstWork(state)?.worktree_path).toBe("/new/wt")
+      expect(firstWork(state)?.session_ids).toContain("session-456")
     })
 
     test("should show existing worktree on resume when no --worktree flag", async () => {
       // given - existing boulder already has worktree_path, no flag given
       const planPath = join(testDir, "plan.md")
       writeFileSync(planPath, "# Plan\n- [ ] Task 1")
-      const existingState: BoulderState = {
+      const existingState: BoulderState = createTestBoulderState({
         active_plan: planPath,
         started_at: "2026-01-01T00:00:00Z",
         session_ids: ["old-session"],
         plan_name: "plan",
         worktree_path: "/existing/wt",
-      }
+      })
       writeBoulderState(testDir, existingState)
 
       const hook = createStartWorkHook(createMockPluginInput())
@@ -1014,7 +1036,7 @@ You are starting a Sisyphus work session.
       expect(output.parts[0].text).not.toContain("Worktree Setup Required")
     })
 
-    test("should show worktree plan progress and path when the mirrored plan exists", async () => {
+    test("should show worktree plan progress and path when the worktree plan exists", async () => {
       // given
       const mainPlanPath = join(testDir, ".sisyphus", "plans", "resume-worktree-plan.md")
       const worktreeDir = join(testDir, "..", `resume-worktree-${randomUUID()}`)
@@ -1023,13 +1045,13 @@ You are starting a Sisyphus work session.
       mkdirSync(dirname(worktreePlanPath), { recursive: true })
       writeFileSync(mainPlanPath, "# Plan\n- [ ] Main repo task\n")
       writeFileSync(worktreePlanPath, "# Plan\n- [x] Worktree task 1\n- [ ] Worktree task 2\n")
-      writeBoulderState(testDir, {
+      writeBoulderState(testDir, createTestBoulderState({
         active_plan: mainPlanPath,
         started_at: "2026-01-01T00:00:00Z",
         session_ids: ["old-session"],
         plan_name: "resume-worktree-plan",
         worktree_path: worktreeDir,
-      })
+      }))
 
       const hook = createStartWorkHook(createMockPluginInput())
       const output = {

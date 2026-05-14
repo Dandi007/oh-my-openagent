@@ -31,12 +31,7 @@ describe("atlas hook idle-event complete boulder", () => {
     const planPath = join(testDirectory, "complete-plan.md")
     writeFileSync(planPath, "# Plan\n\n## TODOs\n- [x] 1. Done\n", "utf-8")
     writeBoulderState(testDirectory, {
-      schema_version: 2,
-      active_work_id: "work-complete",
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00.000Z",
-      session_ids: [sessionID],
-      plan_name: "complete-plan",
+      schema_version: 3,
       works: {
         "work-complete": {
           work_id: "work-complete",

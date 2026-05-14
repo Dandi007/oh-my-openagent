@@ -11,6 +11,7 @@ import {
   createBoulderState,
   getBoulderFilePath,
   getWorkByPlanName,
+  listBoulderWorkIds,
   readBoulderState,
   writeBoulderState,
 } from "../../features/boulder-state"
@@ -141,7 +142,7 @@ describe("buildStartWorkContextInfo", () => {
     const selectedWork = getWorkByPlanName(testDirectory, "explicit-plan-a", { worktreePath: "/tmp/worktree-a" })
     const nextState = readBoulderState(testDirectory)
     expect(selectedWork).not.toBeNull()
-    expect(nextState?.active_work_id).toBe(selectedWork?.work_id)
+    expect(nextState?.works[selectedWork!.work_id]).toBeDefined()
   })
 
   test("falls back to auto-select latest plan when no works exist", () => {
@@ -165,7 +166,8 @@ describe("buildStartWorkContextInfo", () => {
     expect(contextInfo).toContain("Auto-Selected Plan")
     expect(contextInfo).toContain("cold-start-plan")
     expect(contextInfo).toContain(coldStartPlanPath)
-    expect(existsSync(getBoulderFilePath(testDirectory))).toBe(true)
+    // v3: boulder state is stored as per-work files, not boulder.json
+    expect(listBoulderWorkIds(testDirectory).length).toBeGreaterThan(0)
     expect(clearSpy).toHaveBeenCalledTimes(0)
   })
 
@@ -183,7 +185,7 @@ describe("buildStartWorkContextInfo", () => {
     )
     writeBoulderState(testDirectory, initialState)
 
-    const workAId = initialState.active_work_id!
+    const workAId = Object.keys(initialState.works)[0]!
     const withSecondWork = addBoulderWork(testDirectory, {
       planPath: workBPath,
       sessionId: "session-b",

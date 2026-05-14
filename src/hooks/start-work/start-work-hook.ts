@@ -7,7 +7,6 @@ import {
   findPrometheusPlans,
   getPlanProgress,
   createBoulderState,
-  getPlanName,
   clearBoulderState,
 } from "../../features/boulder-state"
 import { log } from "../../shared/logger"

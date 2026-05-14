@@ -123,12 +123,7 @@ describe("createToolExecuteAfterHandler task timers", () => {
     const planPath = join(testDirectory, "task-timer-plan.md")
     writeFileSync(planPath, "# Plan\n\n## TODOs\n- [ ] 1. Implement auth flow\n", "utf-8")
     writeBoulderState(testDirectory, {
-      schema_version: 2,
-      active_work_id: "work-1",
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [parentSessionID],
-      plan_name: "task-timer-plan",
+      schema_version: 3,
       works: {
         "work-1": {
           work_id: "work-1",
@@ -178,12 +173,7 @@ describe("createToolExecuteAfterHandler task timers", () => {
     const planPath = join(testDirectory, "task-timer-complete-plan.md")
     writeFileSync(planPath, "# Plan\n\n## TODOs\n- [ ] 1. Implement auth flow\n", "utf-8")
     writeBoulderState(testDirectory, {
-      schema_version: 2,
-      active_work_id: "work-1",
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [parentSessionID],
-      plan_name: "task-timer-complete-plan",
+      schema_version: 3,
       works: {
         "work-1": {
           work_id: "work-1",
@@ -235,23 +225,7 @@ describe("createToolExecuteAfterHandler task timers", () => {
     const planPath = join(planDirectory, "task-timer-edit-plan.md")
     writeFileSync(planPath, "# Plan\n\n## TODOs\n- [ ] 1. Implement auth flow\n", "utf-8")
     writeBoulderState(testDirectory, {
-      schema_version: 2,
-      active_work_id: "work-1",
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [parentSessionID],
-      plan_name: "task-timer-edit-plan",
-      task_sessions: {
-        "todo:1": {
-          task_key: "todo:1",
-          task_label: "1",
-          task_title: "Implement auth flow",
-          session_id: "ses_child_3",
-          started_at: "2026-01-02T10:00:00Z",
-          status: "running",
-          updated_at: "2026-01-02T10:00:00Z",
-        },
-      },
+      schema_version: 3,
       works: {
         "work-1": {
           work_id: "work-1",
@@ -260,7 +234,17 @@ describe("createToolExecuteAfterHandler task timers", () => {
           started_at: "2026-01-02T10:00:00Z",
           session_ids: [parentSessionID],
           status: "active",
-          task_sessions: {},
+          task_sessions: {
+            "todo:1": {
+              task_key: "todo:1",
+              task_label: "1",
+              task_title: "Implement auth flow",
+              session_id: "ses_child_3",
+              started_at: "2026-01-02T10:00:00Z",
+              status: "running",
+              updated_at: "2026-01-02T10:00:00Z",
+            },
+          },
         },
       },
     })
@@ -304,12 +288,7 @@ describe("createToolExecuteAfterHandler task timers", () => {
       "utf-8",
     )
     writeBoulderState(testDirectory, {
-      schema_version: 2,
-      active_work_id: "work-1",
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [parentSessionID],
-      plan_name: "task-timer-parallel-plan",
+      schema_version: 3,
       works: {
         "work-1": {
           work_id: "work-1",
@@ -383,12 +362,7 @@ describe("createToolExecuteAfterHandler task timers", () => {
     const planPath = join(testDirectory, "task-timer-fallback-plan.md")
     writeFileSync(planPath, "# Plan\n\n## TODOs\n- [ ] 1. First task\n", "utf-8")
     writeBoulderState(testDirectory, {
-      schema_version: 2,
-      active_work_id: "work-1",
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [parentSessionID],
-      plan_name: "task-timer-fallback-plan",
+      schema_version: 3,
       works: {
         "work-1": {
           work_id: "work-1",

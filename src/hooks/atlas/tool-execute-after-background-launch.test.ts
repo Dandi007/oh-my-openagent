@@ -7,6 +7,7 @@ import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import type { Project } from "@opencode-ai/sdk"
 import { readBoulderState, writeBoulderState } from "../../features/boulder-state"
+import type { BoulderState, BoulderWorkState } from "../../features/boulder-state"
 import { createToolExecuteBeforeHandler } from "./tool-execute-before"
 
 const isCallerOrchestratorMock = mock(async () => true)
@@ -39,6 +40,24 @@ type SessionGetResult = {
 
 describe("createToolExecuteAfterHandler background launch detection", () => {
   let testDirectory = ""
+
+  function firstWork() {
+    const state = readBoulderState(testDirectory)
+    return state ? Object.values(state.works)[0] : undefined
+  }
+
+  function createState(work: Partial<BoulderWorkState> & Pick<BoulderWorkState, "active_plan" | "started_at" | "session_ids" | "plan_name">, workId = "work-1"): BoulderState {
+    return {
+      schema_version: 3,
+      works: {
+        [workId]: {
+          work_id: workId,
+          status: "active",
+          ...work,
+        },
+      },
+    }
+  }
 
   beforeEach(() => {
     testDirectory = join(tmpdir(), `atlas-background-launch-${crypto.randomUUID()}`)
@@ -157,12 +176,12 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
 - [ ] 1. Implement auth flow
 `)
 
-        writeBoulderState(testDirectory, {
+        writeBoulderState(testDirectory, createState({
           active_plan: planPath,
           started_at: "2026-01-02T10:00:00Z",
           session_ids: [sessionID],
           plan_name: "background-launch-plan",
-        })
+        }))
 
         const pendingFilePaths = new Map<string, string>()
         const pendingTaskRefs = new Map()
@@ -205,9 +224,9 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
 
         expect(output.output).toContain("Background task launched.")
         expect(collectGitDiffStatsMock).not.toHaveBeenCalled()
-        expect(readBoulderState(testDirectory)?.session_ids).toContain(childSessionID)
-        expect(readBoulderState(testDirectory)?.session_origins?.[childSessionID]).toBe("appended")
-        expect(readBoulderState(testDirectory)?.task_sessions?.["todo:1"]?.session_id).toBe(childSessionID)
+        expect(firstWork()?.session_ids).toContain(childSessionID)
+        expect(firstWork()?.session_origins?.[childSessionID]).toBe("appended")
+        expect(firstWork()?.task_sessions?.["todo:1"]?.session_id).toBe(childSessionID)
       })
 
       it("#then it should not track spawned child when child lookup fails", async () => {
@@ -234,12 +253,12 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
 - [ ] 1. Implement auth flow
 `)
 
-        writeBoulderState(testDirectory, {
+        writeBoulderState(testDirectory, createState({
           active_plan: planPath,
           started_at: "2026-01-02T10:00:00Z",
           session_ids: [sessionID],
           plan_name: "background-launch-plan",
-        })
+        }))
 
         const pendingFilePaths = new Map<string, string>()
         const pendingTaskRefs = new Map()
@@ -280,7 +299,7 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
           output,
         )
 
-        expect(readBoulderState(testDirectory)?.session_ids).not.toContain(childSessionID)
+        expect(firstWork()?.session_ids).not.toContain(childSessionID)
       })
 
       it("#then it should not track an extracted child session outside active lineage", async () => {
@@ -304,12 +323,12 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
 - [ ] 1. Implement auth flow
 `)
 
-        writeBoulderState(testDirectory, {
+        writeBoulderState(testDirectory, createState({
           active_plan: planPath,
           started_at: "2026-01-02T10:00:00Z",
           session_ids: [sessionID],
           plan_name: "background-launch-plan",
-        })
+        }))
 
         const pendingFilePaths = new Map<string, string>()
         const pendingTaskRefs = new Map()
@@ -350,7 +369,7 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
           output,
         )
 
-        expect(readBoulderState(testDirectory)?.session_ids).not.toContain(childSessionID)
+        expect(firstWork()?.session_ids).not.toContain(childSessionID)
       })
 
       it("#then it should not append an unrelated launcher session into active boulder", async () => {
@@ -374,13 +393,13 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
 - [ ] 1. Implement auth flow
 `)
 
-        writeBoulderState(testDirectory, {
+        writeBoulderState(testDirectory, createState({
           active_plan: planPath,
           started_at: "2026-01-02T10:00:00Z",
           session_ids: ["ses_boulder_root"],
           session_origins: { "ses_boulder_root": "direct" },
           plan_name: "background-launch-plan",
-        })
+        }))
 
         const pendingFilePaths = new Map<string, string>()
         const pendingTaskRefs = new Map()
@@ -421,8 +440,8 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
           output,
         )
 
-        expect(readBoulderState(testDirectory)?.session_ids).not.toContain(sessionID)
-        expect(readBoulderState(testDirectory)?.session_ids).not.toContain(childSessionID)
+        expect(firstWork()?.session_ids).not.toContain(sessionID)
+        expect(firstWork()?.session_ids).not.toContain(childSessionID)
       })
 
       it("#then it should append launched child to the session-resolved work", async () => {
@@ -445,12 +464,7 @@ describe("createToolExecuteAfterHandler background launch detection", () => {
         writeFileSync(planPathB, "# Plan\n\n## TODOs\n- [ ] 1. Work B\n")
 
         writeBoulderState(testDirectory, {
-          schema_version: 2,
-          active_work_id: "work-a",
-          active_plan: planPathA,
-          started_at: "2026-01-02T10:00:00Z",
-          session_ids: ["ses_unrelated_active"],
-          plan_name: "background-launch-work-a",
+          schema_version: 3,
           works: {
             "work-a": {
               work_id: "work-a",

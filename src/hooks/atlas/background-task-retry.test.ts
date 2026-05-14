@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { createAtlasHook } from "./atlas-hook"
 import { clearBoulderState, writeBoulderState } from "../../features/boulder-state"
+import type { BoulderState, BoulderWorkState } from "../../features/boulder-state"
 import { _resetForTesting, clearSessionAgent, registerAgentName, setSessionAgent } from "../../features/claude-code-session-state"
 
 // Force process isolation in CI runner (globalThis.setTimeout override conflicts with other atlas tests)
@@ -23,6 +24,19 @@ describe("atlas background task retry", () => {
   let nextFakeTimerId = 1000
   const originalSetTimeout = globalThis.setTimeout
   const originalClearTimeout = globalThis.clearTimeout
+
+  function createTestBoulderState(work: Partial<BoulderWorkState> & Pick<BoulderWorkState, "active_plan" | "started_at" | "session_ids" | "plan_name">): BoulderState {
+    return {
+      schema_version: 3,
+      works: {
+        "test-work": {
+          work_id: "test-work",
+          status: "active",
+          ...work,
+        },
+      },
+    }
+  }
 
   async function flushMicrotasks(): Promise<void> {
     await Promise.resolve()
@@ -110,13 +124,7 @@ describe("atlas background task retry", () => {
     // given
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID], plan_name: "test-plan", agent: "atlas" }))
 
     let backgroundRunning = true
     const promptMock = mock(async () => ({}))
@@ -151,13 +159,7 @@ describe("atlas background task retry", () => {
     // given
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID], plan_name: "test-plan", agent: "atlas" }))
 
     let backgroundRunning = true
     const promptMock = mock(async () => ({}))
@@ -194,13 +196,7 @@ describe("atlas background task retry", () => {
     // given
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID], plan_name: "test-plan", agent: "atlas" }))
 
     let remainingRunningRetries = 2
     const promptMock = mock(async () => ({}))
@@ -247,13 +243,7 @@ describe("atlas background task retry", () => {
     // given
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID], plan_name: "test-plan", agent: "atlas" }))
 
     const promptAsyncMock = mock(async () => ({}))
     let backgroundCheckCount = 0
@@ -303,13 +293,7 @@ describe("atlas background task retry", () => {
     // given
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID], plan_name: "test-plan", agent: "atlas" }))
 
     let backgroundRunning = true
     const promptAsyncMock = mock(async () => ({}))
@@ -351,17 +335,10 @@ describe("atlas background task retry", () => {
     setSessionAgent(descendantSessionID, "atlas")
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID, descendantSessionID],
-      session_origins: {
-        [sessionID]: "direct",
-        [descendantSessionID]: "appended",
-      },
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID, descendantSessionID], session_origins: {
+      [sessionID]: "direct",
+      [descendantSessionID]: "appended",
+    }, plan_name: "test-plan", agent: "atlas" }))
 
     let backgroundRunning = true
     let descendantAgent = "atlas"
@@ -414,13 +391,7 @@ describe("atlas background task retry", () => {
     // given
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID], plan_name: "test-plan", agent: "atlas" }))
 
     const deferredPrompt = createDeferred<{}>()
     const promptAsyncMock = mock(() => deferredPrompt.promise)
@@ -449,13 +420,7 @@ describe("atlas background task retry", () => {
     // given
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID], plan_name: "test-plan", agent: "atlas" }))
 
     const deferredPrompt = createDeferred<unknown>()
     const promptAsyncMock = mock(() => deferredPrompt.promise)
@@ -500,13 +465,7 @@ describe("atlas background task retry", () => {
     // given
     const planPath = join(testDir, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
-    writeBoulderState(testDir, {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
-    })
+    writeBoulderState(testDir, createTestBoulderState({ active_plan: planPath, started_at: "2026-01-02T10:00:00Z", session_ids: [sessionID], plan_name: "test-plan", agent: "atlas" }))
 
     let backgroundRunning = true
     const promptAsyncMock = mock(async () => ({}))

@@ -36,9 +36,9 @@ describe("handleAtlasSessionIdle completion nudge", () => {
     writeFileSync(planPath, "## TODOs\n- [x] 1. Parse input\n- [x] 2. Save output\n")
 
     const boulder = createBoulderState(planPath, SESSION_ID, "atlas")
-    const workId = boulder.active_work_id
+    const workId = Object.keys(boulder.works)[0]
     if (!workId) {
-      throw new Error("Expected active_work_id")
+      throw new Error("Expected work_id")
     }
 
     const work = boulder.works?.[workId]
@@ -47,7 +47,6 @@ describe("handleAtlasSessionIdle completion nudge", () => {
     }
 
     work.elapsed_ms = 65_000
-    boulder.elapsed_ms = 65_000
     work.task_sessions = {
       "todo:2": {
         task_key: "todo:2",
@@ -66,7 +65,6 @@ describe("handleAtlasSessionIdle completion nudge", () => {
         updated_at: new Date().toISOString(),
       },
     }
-    boulder.task_sessions = work.task_sessions
 
     writeBoulderState(testDirectory, boulder)
 

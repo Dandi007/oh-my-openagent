@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto"
 
 import { clearBoulderState, readBoulderState, writeBoulderState } from "../../features/boulder-state"
 import { _resetForTesting, registerAgentName } from "../../features/claude-code-session-state"
-import type { BoulderState } from "../../features/boulder-state"
+import type { BoulderState, BoulderWorkState } from "../../features/boulder-state"
 
 const TEST_STORAGE_ROOT = join(tmpdir(), `atlas-persisted-lineage-storage-${randomUUID()}`)
 const TEST_MESSAGE_STORAGE = join(TEST_STORAGE_ROOT, "message")
@@ -39,16 +39,28 @@ describe("atlas hook idle-event persisted lineage", () => {
   let testDirectory = ""
   let promptCalls: Array<unknown> = []
 
-  function writeIncompleteBoulder(overrides: Partial<BoulderState> = {}): void {
+  function firstWork() {
+    const state = readBoulderState(testDirectory)
+    return state ? Object.values(state.works)[0] : undefined
+  }
+
+  function writeIncompleteBoulder(overrides: Partial<BoulderWorkState> = {}): void {
     const planPath = join(testDirectory, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
 
     const state: BoulderState = {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [MAIN_SESSION_ID],
-      plan_name: "test-plan",
-      ...overrides,
+      schema_version: 3,
+      works: {
+        "test-work": {
+          work_id: "test-work",
+          active_plan: planPath,
+          started_at: "2026-01-02T10:00:00Z",
+          session_ids: [MAIN_SESSION_ID],
+          plan_name: "test-plan",
+          status: "active",
+          ...overrides,
+        },
+      },
     }
 
     writeBoulderState(testDirectory, state)
@@ -123,7 +135,7 @@ describe("atlas hook idle-event persisted lineage", () => {
     })
 
     // then
-    expect(readBoulderState(testDirectory)?.session_ids).not.toContain(descendantSessionID)
+    expect(firstWork()?.session_ids).not.toContain(descendantSessionID)
     expect(promptCalls.length).toBe(0)
   })
 

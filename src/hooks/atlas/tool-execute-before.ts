@@ -4,7 +4,7 @@ import { isCallerOrchestrator } from "../../shared/session-utils"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { getWorkForSession, readBoulderState, readCurrentTopLevelTask, resolveBoulderPlanPath, resolveBoulderPlanPathForWork } from "../../features/boulder-state"
+import { getWorkForSession, readCurrentTopLevelTask, resolveBoulderPlanPathForWork } from "../../features/boulder-state"
 import { HOOK_NAME } from "./hook-name"
 import { ORCHESTRATOR_DELEGATION_REQUIRED, SINGLE_TASK_DIRECTIVE } from "./system-reminder-templates"
 import { isSisyphusPath } from "./sisyphus-path"
@@ -91,12 +91,9 @@ export function createToolExecuteBeforeHandler(input: {
       const sessionWork = sessionID
         ? getWorkForSession(ctx.directory, sessionID)
         : null
-      const state = sessionWork ? null : readBoulderState(ctx.directory)
       const planPath = sessionWork
         ? resolveBoulderPlanPathForWork(ctx.directory, sessionWork)
-        : state
-          ? resolveBoulderPlanPath(ctx.directory, state)
-          : null
+        : null
 
       if (planPath && resolve(filePath) === resolve(planPath) && pendingPlanSnapshots) {
         try {
@@ -132,9 +129,11 @@ export function createToolExecuteBeforeHandler(input: {
         } else {
           const prompt = typeof toolOutput.args.prompt === "string" ? toolOutput.args.prompt : ""
           const taskFromPrompt = parseTrackedTaskFromPrompt(prompt)
-          const boulderState = readBoulderState(ctx.directory)
-          const currentTask = boulderState
-            ? readCurrentTopLevelTask(resolveBoulderPlanPath(ctx.directory, boulderState))
+          const sessionWork = toolInput.sessionID
+            ? getWorkForSession(ctx.directory, toolInput.sessionID)
+            : null
+          const currentTask = sessionWork
+            ? readCurrentTopLevelTask(resolveBoulderPlanPathForWork(ctx.directory, sessionWork))
             : null
           const resolvedTask = taskFromPrompt ?? (currentTask
             ? {

@@ -14,6 +14,10 @@ import {
   updateSessionAgent,
 } from "./features/claude-code-session-state"
 
+function firstBoulderWork(directory: string) {
+  const state = readBoulderState(directory)
+  return state ? Object.values(state.works)[0] : undefined
+}
 
 describe("createPluginInterface - command.execute.before", () => {
   let testDir = ""
@@ -76,7 +80,7 @@ describe("createPluginInterface - command.execute.before", () => {
     expect(output.parts[0]?.text).toContain("Auto-Selected Plan")
     expect(output.parts[0]?.text).toContain("boulder.json has been created")
     expect(getSessionAgent("ses-command-before")).toBe("sisyphus")
-    expect(readBoulderState(testDir)?.agent).toBe("sisyphus")
+    expect(firstBoulderWork(testDir)?.agent).toBe("sisyphus")
   })
 
   test("does not run start-work side effects for other native commands with session context", async () => {
@@ -167,7 +171,7 @@ describe("createPluginInterface - command.execute.before", () => {
     // then
     expect(output.message.agent).toBe("atlas")
     expect(getSessionAgent("ses-command-atlas")).toBe("atlas")
-    expect(readBoulderState(testDir)?.agent).toBe("atlas")
+    expect(firstBoulderWork(testDir)?.agent).toBe("atlas")
   })
 })
 

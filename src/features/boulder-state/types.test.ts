@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type {
+  BoulderIndex,
   BoulderSessionOrigin,
   BoulderState,
+  BoulderStateV2,
   BoulderTaskStatus,
   BoulderWorkResumeOption,
   BoulderWorkState,
@@ -11,9 +13,9 @@ import type {
 } from "./types"
 
 describe("boulder-state types", () => {
-  test("keeps legacy BoulderState assignable while allowing v2 fields", () => {
+  test("keeps legacy BoulderStateV2 assignable while allowing v2 fields", () => {
     // given
-    const legacyState: BoulderState = {
+    const legacyState: BoulderStateV2 = {
       active_plan: "/tmp/plan.md",
       started_at: "2026-01-01T00:00:00.000Z",
       session_ids: ["ses_1"],
@@ -25,6 +27,51 @@ describe("boulder-state types", () => {
 
     // then
     expect(hasLegacyShape).toBe(true)
+  })
+
+  test("v3 BoulderState is a pure container with no mirror fields", () => {
+    // given
+    const work: BoulderWorkState = {
+      work_id: "plan-abc12345",
+      active_plan: "/tmp/plan.md",
+      plan_name: "plan",
+      status: "active",
+      started_at: "2026-01-01T00:00:00.000Z",
+      session_ids: ["ses_1"],
+    }
+
+    const state: BoulderState = {
+      schema_version: 3,
+      works: { "plan-abc12345": work },
+    }
+
+    // then — v3 BoulderState has NO mirror fields
+    expect(state.schema_version).toBe(3)
+    expect(state.works["plan-abc12345"].plan_name).toBe("plan")
+    // @ts-expect-error — active_plan should not exist on v3 BoulderState
+    expect((state as any).active_plan).toBeUndefined()
+    // @ts-expect-error — plan_name should not exist on v3 BoulderState
+    expect((state as any).plan_name).toBeUndefined()
+    // @ts-expect-error — status should not exist on v3 BoulderState
+    expect((state as any).status).toBeUndefined()
+    // @ts-expect-error — session_ids should not exist on v3 BoulderState
+    expect((state as any).session_ids).toBeUndefined()
+  })
+
+  test("v3 BoulderIndex maps sessions to work IDs", () => {
+    // given
+    const index: BoulderIndex = {
+      schema_version: 3,
+      sessions: {
+        ses_abc: "plan-abc12345",
+        ses_def: "other-6789abcd",
+      },
+    }
+
+    // then
+    expect(index.schema_version).toBe(3)
+    expect(index.sessions["ses_abc"]).toBe("plan-abc12345")
+    expect(Object.keys(index.sessions)).toHaveLength(2)
   })
 
   test("supports multi-work and timer fields", () => {

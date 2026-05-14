@@ -17,6 +17,11 @@ import { clearSessionModel, getSessionModel, setSessionModel } from "../shared/s
 type ChatMessagePart = { type: string; text?: string; [key: string]: unknown }
 type ChatMessageHandlerOutput = { message: Record<string, unknown>; parts: ChatMessagePart[] }
 
+function firstBoulderWork(directory: string) {
+  const state = readBoulderState(directory)
+  return state ? Object.values(state.works)[0] : undefined
+}
+
 function createStartWorkTemplateOutput(): ChatMessageHandlerOutput {
   return {
     message: {},
@@ -215,7 +220,7 @@ describe("createChatMessageHandler - /start-work integration", () => {
     expect(output.parts[0].text).toContain("Auto-Selected Plan")
     expect(output.parts[0].text).toContain("boulder.json has been created")
     expect(getSessionAgent("test-session")).toBe("sisyphus")
-    expect(readBoulderState(testDir)?.agent).toBe("sisyphus")
+    expect(firstBoulderWork(testDir)?.agent).toBe("sisyphus")
   })
 
   test("smoke: resolves quoted human-readable plan names through the full /start-work chat.message path", async () => {
@@ -243,7 +248,7 @@ describe("createChatMessageHandler - /start-work integration", () => {
     expect(output.parts[0].text).toContain("<auto-slash-command>")
     expect(output.parts[0].text).toContain("Auto-Selected Plan")
     expect(output.parts[0].text).toContain("my-feature-plan")
-    expect(readBoulderState(testDir)?.plan_name).toBe("my-feature-plan")
+    expect(firstBoulderWork(testDir)?.plan_name).toBe("my-feature-plan")
   })
 })
 

@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { RunContext } from "./types"
 import { _resetForTesting, setSessionAgent } from "../../features/claude-code-session-state"
+import { writeBoulderState } from "../../features/boulder-state"
 import { writeState as writeRalphLoopState } from "../../hooks/ralph-loop/storage"
 
 const testDirs: string[] = []
@@ -51,21 +52,30 @@ function writeBoulderStateFile(
   activePlanPath: string,
   sessionIDs: string[],
   sessionOrigins?: Record<string, "direct" | "appended">,
+  worktreePath?: string,
 ): void {
-  const sisyphusDir = join(directory, ".sisyphus")
-  mkdirSync(sisyphusDir, { recursive: true })
-  writeFileSync(
-    join(sisyphusDir, "boulder.json"),
-    JSON.stringify({
-      active_plan: activePlanPath,
-      started_at: new Date().toISOString(),
-      session_ids: sessionIDs,
-      session_origins: sessionOrigins,
-      plan_name: "test-plan",
-      agent: "atlas",
-    }),
-    "utf-8",
-  )
+  const startedAt = new Date().toISOString()
+  // Default session_origins: first session is "direct", rest are undefined
+  // (matches v2 behavior where only the root session was explicitly tracked)
+  const resolvedOrigins = sessionOrigins ?? (sessionIDs.length > 0
+    ? { [sessionIDs[0]]: "direct" as const }
+    : {})
+  writeBoulderState(directory, {
+    schema_version: 3,
+    works: {
+      "test-work": {
+        work_id: "test-work",
+        active_plan: activePlanPath,
+        started_at: startedAt,
+        updated_at: startedAt,
+        session_ids: sessionIDs,
+        session_origins: resolvedOrigins,
+        plan_name: "test-plan",
+        agent: "atlas",
+        ...(worktreePath ? { worktree_path: worktreePath } : {}),
+      },
+    },
+  })
 }
 
 describe("checkCompletionConditions continuation coverage", () => {
@@ -105,7 +115,7 @@ describe("checkCompletionConditions continuation coverage", () => {
     expect(result).toBe(true)
   })
 
-  it("returns true when the mirrored worktree plan is complete even if the main repo plan is stale", async () => {
+  it("returns true when the work-level worktree plan is complete even if the main repo plan is stale", async () => {
     // given
     spyOn(console, "log").mockImplementation(() => {})
     const directory = createTempDir()
@@ -116,20 +126,7 @@ describe("checkCompletionConditions continuation coverage", () => {
     mkdirSync(join(worktreeDirectory, ".sisyphus", "plans"), { recursive: true })
     writeFileSync(mainPlanPath, "- [ ] stale main repo task\n", "utf-8")
     writeFileSync(worktreePlanPath, "- [x] completed worktree task\n", "utf-8")
-    const sisyphusDir = join(directory, ".sisyphus")
-    mkdirSync(sisyphusDir, { recursive: true })
-    writeFileSync(
-      join(sisyphusDir, "boulder.json"),
-      JSON.stringify({
-        active_plan: mainPlanPath,
-        started_at: new Date().toISOString(),
-        session_ids: ["test-session"],
-        plan_name: "done-in-worktree-plan",
-        agent: "atlas",
-        worktree_path: worktreeDirectory,
-      }),
-      "utf-8",
-    )
+    writeBoulderStateFile(directory, mainPlanPath, ["test-session"], undefined, worktreeDirectory)
     const ctx = createMockContext(directory)
     const { checkCompletionConditions } = await import("./completion")
 

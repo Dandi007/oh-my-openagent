@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { boulder } from "./boulder"
+import { writeBoulderState, writeBoulderWork, writeBoulderIndex, readBoulderIndex, BOULDER_DIR, BOULDER_INDEX_PATH } from "../../features/boulder-state"
 
 function createTempDirectory(): string {
   return mkdtempSync(join(tmpdir(), "omo-boulder-cli-"))
@@ -35,35 +36,11 @@ function seedPlanAndState(directory: string): void {
     "utf-8",
   )
 
-  const boulderDirectory = join(directory, ".sisyphus")
-  mkdirSync(boulderDirectory, { recursive: true })
-
-  writeFileSync(
-    join(boulderDirectory, "boulder.json"),
-    JSON.stringify(
-      {
-        schema_version: 2,
-        active_work_id: "work-alpha",
-        active_plan: planAPath,
-        started_at: "2026-05-10T00:00:00.000Z",
-        ended_at: "2026-05-10T00:30:00.000Z",
-        elapsed_ms: 1_800_000,
-        status: "active",
-        updated_at: "2026-05-10T00:30:00.000Z",
-        session_ids: ["ses-1", "ses-2"],
-        plan_name: "alpha",
-        task_sessions: {
-          "todo:2": {
-            task_key: "todo:2",
-            task_label: "2",
-            task_title: "Alpha task running",
-            session_id: "ses-2",
-            elapsed_ms: 60000,
-            status: "running",
-            updated_at: "2026-05-10T00:30:00.000Z",
-          },
-        },
-        works: {
+  writeBoulderState(
+    directory,
+    {
+      schema_version: 3,
+      works: {
           "work-alpha": {
             work_id: "work-alpha",
             active_plan: planAPath,
@@ -99,10 +76,6 @@ function seedPlanAndState(directory: string): void {
           },
         },
       },
-      null,
-      2,
-    ),
-    "utf-8",
   )
 }
 
@@ -211,5 +184,117 @@ describe("boulder command", () => {
     const parsed = JSON.parse(stdout.value)
     expect(parsed.works).toHaveLength(1)
     expect(parsed.works[0].work_id).toBe("work-beta")
+  })
+
+  // ─── Edge case: corrupt index.json ──────────────────────────────
+
+  it("still lists works when index.json is corrupt (non-JSON)", async () => {
+    const directory = createTempDirectory()
+    createdDirectories.push(directory)
+    seedPlanAndState(directory)
+
+    // Corrupt the index
+    const indexPath = join(directory, BOULDER_INDEX_PATH)
+    writeFileSync(indexPath, "not valid json {{{")
+
+    const stdout = { value: "" }
+    captureOutput("stdout", stdout)
+
+    const exitCode = await boulder({ directory, json: true })
+    expect(exitCode).toBe(0)
+
+    const parsed = JSON.parse(stdout.value)
+    expect(parsed.works.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("still lists works when index.json is empty", async () => {
+    const directory = createTempDirectory()
+    createdDirectories.push(directory)
+    seedPlanAndState(directory)
+
+    // Empty the index
+    const indexPath = join(directory, BOULDER_INDEX_PATH)
+    writeFileSync(indexPath, "")
+
+    const stdout = { value: "" }
+    captureOutput("stdout", stdout)
+
+    const exitCode = await boulder({ directory, json: true })
+    expect(exitCode).toBe(0)
+
+    const parsed = JSON.parse(stdout.value)
+    expect(parsed.works.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("still lists works when index.json has wrong schema_version", async () => {
+    const directory = createTempDirectory()
+    createdDirectories.push(directory)
+    seedPlanAndState(directory)
+
+    // Write index with wrong schema version
+    const indexPath = join(directory, BOULDER_INDEX_PATH)
+    writeFileSync(indexPath, JSON.stringify({ schema_version: 2, sessions: {} }))
+
+    const stdout = { value: "" }
+    captureOutput("stdout", stdout)
+
+    const exitCode = await boulder({ directory, json: true })
+    expect(exitCode).toBe(0)
+
+    const parsed = JSON.parse(stdout.value)
+    expect(parsed.works.length).toBeGreaterThanOrEqual(1)
+  })
+
+  // ─── Edge case: orphan work file ────────────────────────────────
+
+  it("lists orphan work files (no index entry)", async () => {
+    const directory = createTempDirectory()
+    createdDirectories.push(directory)
+
+    const planDirectory = join(directory, ".sisyphus", "plans")
+    mkdirSync(planDirectory, { recursive: true })
+    const planPath = join(planDirectory, "orphan.md")
+    writeFileSync(planPath, "## TODOs\n- [ ] 1. Orphan task\n", "utf-8")
+
+    // Write work file directly without index
+    writeBoulderWork(directory, "orphan-work", {
+      work_id: "orphan-work",
+      active_plan: planPath,
+      plan_name: "orphan",
+      status: "active",
+      started_at: "2026-05-10T00:00:00.000Z",
+      updated_at: "2026-05-10T00:00:00.000Z",
+      session_ids: ["orphan-ses"],
+    })
+
+    const stdout = { value: "" }
+    captureOutput("stdout", stdout)
+
+    const exitCode = await boulder({ directory, json: true })
+    expect(exitCode).toBe(0)
+
+    const parsed = JSON.parse(stdout.value)
+    expect(parsed.works).toHaveLength(1)
+    expect(parsed.works[0].work_id).toBe("orphan-work")
+    expect(parsed.works[0].plan_name).toBe("orphan")
+  })
+
+  // ─── Edge case: missing work file ───────────────────────────────
+
+  it("returns 2 when boulder file exists but state is unreadable", async () => {
+    const directory = createTempDirectory()
+    createdDirectories.push(directory)
+
+    // Create v2 boulder.json (so the CLI knows boulder state "exists")
+    const sisyphusDir = join(directory, ".sisyphus")
+    mkdirSync(sisyphusDir, { recursive: true })
+    writeFileSync(join(sisyphusDir, "boulder.json"), "not valid json {{{")
+
+    const stderr = { value: "" }
+    captureOutput("stderr", stderr)
+
+    const exitCode = await boulder({ directory })
+    expect(exitCode).toBe(2)
+    expect(stderr.value).toContain("Failed to read boulder state")
   })
 })
