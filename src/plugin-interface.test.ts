@@ -42,7 +42,10 @@ describe("createPluginInterface - command.execute.before", () => {
     const pluginInterface = createPluginInterface({
       ctx: {
         directory: testDir,
-        client: { tui: { showToast: async () => {} } },
+        client: {
+          tui: { showToast: async () => {} },
+          session: { promptAsync: async () => {} },
+        },
       } as never,
       pluginConfig: {} as never,
       firstMessageVariantGate: {
@@ -56,7 +59,10 @@ describe("createPluginInterface - command.execute.before", () => {
         autoSlashCommand: createAutoSlashCommandHook({ skills: [] }),
         startWork: createStartWorkHook({
           directory: testDir,
-          client: { tui: { showToast: async () => {} } },
+          client: {
+            tui: { showToast: async () => {} },
+            session: { promptAsync: async () => {} },
+          },
         } as never),
       } as never,
       tools: {},
