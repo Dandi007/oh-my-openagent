@@ -141,6 +141,18 @@ export function createToolExecuteAfterHandler(input: {
       return
     }
 
+    // Auto-rebuild boulder index after any tool execution.
+    // Agents may write to .sisyphus/boulder/ via apply_patch, bypassing writeBoulderState.
+    try {
+      const { existsSync: es } = await import("node:fs")
+      const boulderDir = `${ctx.directory}/.sisyphus/boulder`
+      if (es(boulderDir)) {
+        const { rebuildIndexFromWorkFiles, writeBoulderIndex } = await import("../../features/boulder-state")
+        const index = rebuildIndexFromWorkFiles(ctx.directory)
+        writeBoulderIndex(ctx.directory, index)
+      }
+    } catch { /* best effort */ }
+
     if (isWriteOrEditToolName(toolInput.tool)) {
       let filePath = toolInput.callID ? pendingFilePaths.get(toolInput.callID) : undefined
       const planSnapshot = toolInput.callID && pendingPlanSnapshots
@@ -168,13 +180,6 @@ export function createToolExecuteAfterHandler(input: {
             }
           }
         }
-      }
-
-      // Auto-rebuild boulder index when agent writes to .sisyphus/boulder/
-      if (filePath && isSisyphusPath(filePath) && filePath.includes("/boulder/")) {
-        const { rebuildIndexFromWorkFiles, writeBoulderIndex } = await import("../../features/boulder-state")
-        const index = rebuildIndexFromWorkFiles(ctx.directory)
-        writeBoulderIndex(ctx.directory, index)
       }
 
       if (filePath && !isSisyphusPath(filePath)) {
