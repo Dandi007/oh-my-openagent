@@ -551,6 +551,12 @@ export function readBoulderState(directory: string): BoulderState | null {
       }
     }
     if (Object.keys(works).length > 0) {
+      // Auto-rebuild index if missing (agent apply_patch may bypass writeBoulderState)
+      const index = readBoulderIndex(directory)
+      if (!index) {
+        const rebuilt = rebuildIndexFromWorkFiles(directory)
+        writeBoulderIndex(directory, rebuilt)
+      }
       return { schema_version: 3, works }
     }
     // v3 dir exists but no valid work files — fall through to try v2
