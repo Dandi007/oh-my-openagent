@@ -5,9 +5,11 @@ import {
   getPlanProgress,
   getTaskSessionStateForWork,
   readBoulderState,
+  rebuildIndexFromWorkFiles,
   resolveBoulderPlanPathForWork,
   startTaskTimer,
   upsertTaskSessionState,
+  writeBoulderIndex,
 } from "../../features/boulder-state"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
@@ -144,10 +146,8 @@ export function createToolExecuteAfterHandler(input: {
     // Auto-rebuild boulder index after any tool execution.
     // Agents may write to .sisyphus/boulder/ via apply_patch, bypassing writeBoulderState.
     try {
-      const { existsSync: es } = await import("node:fs")
       const boulderDir = `${ctx.directory}/.sisyphus/boulder`
-      if (es(boulderDir)) {
-        const { rebuildIndexFromWorkFiles, writeBoulderIndex } = await import("../../features/boulder-state")
+      if (existsSync(boulderDir)) {
         const index = rebuildIndexFromWorkFiles(ctx.directory)
         writeBoulderIndex(ctx.directory, index)
       }
