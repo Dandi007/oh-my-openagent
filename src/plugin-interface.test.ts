@@ -39,12 +39,28 @@ describe("createPluginInterface - command.execute.before", () => {
   test("executes start-work side effects for native command execution", async () => {
     // given
     updateSessionAgent("ses-command-before", "prometheus")
+    const promptAsyncCalls: Array<{
+      sessionID: string
+      agent: string
+      promptContains: string
+    }> = []
     const pluginInterface = createPluginInterface({
       ctx: {
         directory: testDir,
         client: {
           tui: { showToast: async () => {} },
-          session: { promptAsync: async () => {} },
+          session: {
+            promptAsync: async (params: {
+              path: { id: string }
+              body: { agent: string; parts: Array<{ type: string; text?: string }> }
+            }) => {
+              promptAsyncCalls.push({
+                sessionID: params.path.id,
+                agent: params.body.agent,
+                promptContains: params.body.parts[0]?.text ?? "",
+              })
+            },
+          },
         },
       } as never,
       pluginConfig: {} as never,
@@ -61,7 +77,18 @@ describe("createPluginInterface - command.execute.before", () => {
           directory: testDir,
           client: {
             tui: { showToast: async () => {} },
-            session: { promptAsync: async () => {} },
+            session: {
+              promptAsync: async (params: {
+                path: { id: string }
+                body: { agent: string; parts: Array<{ type: string; text?: string }> }
+              }) => {
+                promptAsyncCalls.push({
+                  sessionID: params.path.id,
+                  agent: params.body.agent,
+                  promptContains: params.body.parts[0]?.text ?? "",
+                })
+              },
+            },
           },
         } as never),
       } as never,
@@ -87,6 +114,13 @@ describe("createPluginInterface - command.execute.before", () => {
     expect(output.parts[0]?.text).toContain("boulder.json has been created")
     expect(getSessionAgent("ses-command-before")).toBe("sisyphus")
     expect(firstBoulderWork(testDir)?.agent).toBe("sisyphus")
+
+    // Verify CLI continuation injection
+    expect(promptAsyncCalls.length).toBe(1)
+    expect(promptAsyncCalls[0].sessionID).toBe("ses-command-before")
+    expect(promptAsyncCalls[0].agent).toBe("sisyphus")
+    expect(promptAsyncCalls[0].promptContains).toContain("Continue working")
+    expect(promptAsyncCalls[0].promptContains).toContain("worker-plan")
   })
 
   test("does not run start-work side effects for other native commands with session context", async () => {
