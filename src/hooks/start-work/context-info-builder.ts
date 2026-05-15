@@ -7,8 +7,8 @@ import {
   findPrometheusPlans,
   getActiveWorks,
   getPlanProgress,
-  getWorkById,
   getWorkByPlanName,
+  getWorkForSessionStrict,
   getWorkResumeOptions,
   readBoulderState,
   readBoulderWork,
@@ -158,7 +158,7 @@ function buildMultipleActiveWorksContext(params: {
 
   return `
 <system-reminder>
-## Multiple Active Works Found
+## Active Work Selection Required
 
 Current Time: ${timestamp}
 Session ID: ${sessionId}
@@ -169,6 +169,10 @@ Use the Question tool to ask the user which plan to resume.
 - If the user chooses one option, run /start-work {plan-name} for that plan.
 - If the user chooses to start a new plan, proceed with cold-start auto-selection flow.
 </system-reminder>`
+}
+
+function isResumableWork(work: BoulderWorkState): boolean {
+  return work.status === undefined || work.status === "active" || work.status === "paused"
 }
 
 function createNewWorkOrInitialize(params: {
@@ -273,6 +277,10 @@ Looking for new plans...`
   const effectiveWorktree = worktreePath ?? work.worktree_path
   const sessionAlreadyTracked = work.session_ids.includes(sessionId)
   const shouldRewriteState = work.agent !== activeAgent || worktreePath !== undefined
+  const sessionCountAfterResume = sessionAlreadyTracked ? work.session_ids.length : work.session_ids.length + 1
+  const sessionTrackingText = sessionAlreadyTracked
+    ? `The current session (${sessionId}) is already tracked in session_ids.`
+    : `The current session (${sessionId}) has been added to session_ids.`
 
   // Always use appendSessionIdForWork for session tracking — it updates
   // session_origins and the index, not just the work file.
@@ -303,11 +311,11 @@ Looking for new plans...`
 **Plan**: ${work.plan_name}
 **Path**: ${planPath}
 **Progress**: ${progress.completed}/${progress.total} tasks completed
-**Sessions**: ${work.session_ids.length + 1} (current session appended)
+**Sessions**: ${sessionCountAfterResume} (${sessionAlreadyTracked ? "current session already tracked" : "current session appended"})
 **Started**: ${work.started_at}
 ${worktreeDisplay}
 
-The current session (${sessionId}) has been added to session_ids.
+${sessionTrackingText}
 Read the plan file and continue from the first unchecked task.`
 }
 
@@ -403,21 +411,16 @@ export function buildStartWorkContextInfo(params: {
   const resumeOptions = getWorkResumeOptions(ctx.directory)
     .filter((option) => option.status === "active" || option.status === "paused")
 
-  if (!explicitPlanName && resumeOptions.length > 1) {
-    return buildMultipleActiveWorksContext({
-      resumeOptions,
-      sessionId,
-      timestamp,
-    })
-  }
+  if (!explicitPlanName) {
+    const sessionWorkResult = getWorkForSessionStrict(ctx.directory, sessionId)
+    if (sessionWorkResult.error) {
+      log(`[${HOOK_NAME}] Failed to resolve work for current session: ${sessionWorkResult.error}`, { sessionID: sessionId })
+    }
 
-  if (!explicitPlanName && resumeOptions.length === 1) {
-    const onlyOption = resumeOptions[0]
-    const work = getWorkById(ctx.directory, onlyOption.work_id)
-    if (work) {
-      selectActiveWork(ctx.directory, onlyOption.work_id)
+    const sessionWork = sessionWorkResult.work
+    if (sessionWork && isResumableWork(sessionWork)) {
       return buildExistingSessionContext({
-        work,
+        work: sessionWork,
         sessionId,
         activeAgent,
         worktreePath,
@@ -425,6 +428,14 @@ export function buildStartWorkContextInfo(params: {
         directory: ctx.directory,
       })
     }
+  }
+
+  if (!explicitPlanName && resumeOptions.length > 0) {
+    return buildMultipleActiveWorksContext({
+      resumeOptions,
+      sessionId,
+      timestamp,
+    })
   }
 
   if (!explicitPlanName && resumeOptions.length === 0 && getActiveWorks(ctx.directory).length === 0) {
