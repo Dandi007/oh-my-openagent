@@ -1,0 +1,1083 @@
+Task 8 full verification started at 2026-05-16 00:55:07 +0800
+Worktree: /Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix
+Branch: fix/boulder-start-work-session-isolation
+
+LSP diagnostics:
+Attempted via lsp_diagnostics on src/hooks/start-work; blocked because typescript-language-server is not installed. No global install performed.
+
+Environment isolation:
+Unsetting OPENCODE_DB, OPENCODE_CONFIG_DIR, OPENCODE_CONFIG_HOME, XDG_CONFIG_HOME, OPENCODE_SERVER_PASSWORD for deterministic tests.
+node_modules: missing; creating temporary symlink from boulder-multi-session.
+web/node_modules: missing; running bun install --frozen-lockfile in web for @playwright/test import resolution.
+bun install v1.3.14 (0d9b296a)
+
+$ node ./scripts/generate-docs-content.mjs
+Generated /Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/lib/docs-content.generated.ts with 9 HTML-compiled docs
+
++ @opennextjs/cloudflare@1.19.8
++ @playwright/test@1.59.1
++ @tailwindcss/postcss@4.2.4
++ @types/node@25.6.2
++ @types/react@19.2.14
++ @types/react-dom@19.2.3
++ critters@0.0.25
++ eslint@10.3.0
++ eslint-config-next@15.5.18
++ eslint-config-prettier@10.1.8
++ eslint-plugin-prettier@5.5.5
++ globals@17.6.0
++ postcss@8.5.14
++ prettier@3.8.3
++ prettier-plugin-tailwindcss@0.8.0
++ tailwindcss@4.2.4
++ typescript@6.0.3
++ typescript-eslint@8.59.2
++ wrangler@4.90.0
++ @radix-ui/react-accordion@1.2.12
++ @radix-ui/react-separator@1.1.8
++ @radix-ui/react-slot@1.2.4
++ class-variance-authority@0.7.1
++ clsx@2.1.1
++ geist@1.7.0
++ lucide-react@0.577.0
++ marked@18.0.3
++ motion@12.38.0
++ next@15.5.18
++ next-intl@4.11.0
++ react@19.2.6
++ react-dom@19.2.6
++ tailwind-merge@3.5.0
++ tailwindcss-animate@1.0.7
+
+672 packages installed [12.14s]
+web bun install exit code: 0
+boulder-multi-session evidence fixture: missing; creating temporary symlink.
+
+===== COMMAND: bun test src/hooks/start-work/context-info-builder.test.ts =====
+bun test v1.3.14 (0d9b296a)
+
+ 7 pass
+ 0 fail
+ 38 expect() calls
+Ran 7 tests across 1 file. [103.00ms]
+===== EXIT CODE: 0 =====
+
+===== COMMAND: bun test src/hooks/start-work/index.test.ts =====
+bun test v1.3.14 (0d9b296a)
+
+src/hooks/start-work/index.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-other" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-target" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+
+ 38 pass
+ 0 fail
+ 102 expect() calls
+Ran 38 tests across 1 file. [1095.00ms]
+===== EXIT CODE: 0 =====
+
+===== COMMAND: bun test src/plugin/command-execute-before.test.ts =====
+bun test v1.3.14 (0d9b296a)
+
+ 3 pass
+ 0 fail
+ 11 expect() calls
+Ran 3 tests across 1 file. [26.00ms]
+===== EXIT CODE: 0 =====
+
+===== COMMAND: bun test =====
+bun test v1.3.14 (0d9b296a)
+
+src/plugin/chat-params.test.ts:
+283 |     //#when
+284 |     await handler(input, output)
+285 | 
+286 |     //#then
+287 |     expect(output.maxOutputTokens).toBe(4096)
+288 |     expect(logSpy).toHaveBeenCalledWith(
+                         ^
+error: expect(received).toHaveBeenCalledWith(...expected)
+
+Expected: [ "[plugin] maxOutputTokens=0 is non-positive; using safe fallback 4096" ]
+But it was not called.
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/chat-params.test.ts:288:20)
+(fail) createChatParamsHandler > falls back to default maxOutputTokens when stored and compatibility tokens are non-positive [0.60ms]
+
+src/plugin/ultrawork-db-model-override.test.ts:
+116 |     )
+117 |     await flushMicrotasks(5)
+118 | 
+119 |     //#then
+120 |     const model = readMessageModel("msg_001")
+121 |     expect(model).toEqual({ providerID: "anthropic", modelID: "claude-opus-4-7" })
+                        ^
+error: expect(received).toEqual(expected)
+
+@@ -1,3 +1,3 @@
+  {
+-   "modelID": "claude-opus-4-7",
++   "modelID": "claude-sonnet-4-6",
+    "providerID": "anthropic",
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:121:19)
+(fail) scheduleDeferredModelOverride > should update model in DB after microtask flushes [15.62ms]
+132 |       "max",
+133 |     )
+134 |     await flushMicrotasks(5)
+135 | 
+136 |     //#then
+137 |     expect(readMessageField("msg_002", "variant")).toBe("max")
+                                                         ^
+error: expect(received).toBe(expected)
+
+Expected: "max"
+Received: null
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:137:52)
+(fail) scheduleDeferredModelOverride > should update variant and thinking fields when variant provided [14.79ms]
+166 |     )
+167 |     await flushMicrotasks(5)
+168 | 
+169 |     //#then
+170 |     const model = readMessageModel("msg_003")
+171 |     expect(model).toEqual({ providerID: "anthropic", modelID: "claude-opus-4-7" })
+                        ^
+error: expect(received).toEqual(expected)
+
+@@ -1,3 +1,3 @@
+  {
+-   "modelID": "claude-opus-4-7",
++   "modelID": "claude-sonnet-4-6",
+    "providerID": "anthropic",
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:171:19)
+(fail) scheduleDeferredModelOverride > should not update variant fields when variant is undefined [15.13ms]
+183 |       { providerID: "anthropic", modelID: "claude-opus-4-7" },
+184 |     )
+185 |     await flushMicrotasks(5)
+186 | 
+187 |     //#then
+188 |     expect(logSpy).toHaveBeenCalledWith(
+                         ^
+error: expect(received).toHaveBeenCalledWith(...expected)
+
+Expected: [
+  StringContaining "DB not found"
+]
+But it was not called.
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:188:20)
+(fail) scheduleDeferredModelOverride > should not crash when DB path does not exist [14.41ms]
+213 |       )
+214 |       && isRecord(metadata)
+215 |       && metadata.messageId === "msg_corrupt"
+216 |     )
+217 | 
+218 |     expect(failureCall).toBeDefined()
+                              ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:218:25)
+(fail) scheduleDeferredModelOverride > should log a DB failure when DB file exists but is corrupted [14.30ms]
+
+src/shared/opencode-config-dir.test.ts:
+56 | 
+57 |       // when getOpenCodeConfigDir is called with binary="opencode"
+58 |       const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+59 | 
+60 |       // then returns default ~/.config/opencode
+61 |       expect(result).toBe(join(homedir(), ".config", "opencode"))
+                          ^
+error: expect(received).toBe(expected)
+
+Expected: "/Users/uther/.config/opencode"
+Received: "/Volumes/Data/opencode-data/home/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:61:22)
+(fail) opencode-config-dir > OPENCODE_CONFIG_DIR environment variable > falls back to default when env var is not set [0.21ms]
+69 | 
+70 |       // when getOpenCodeConfigDir is called with binary="opencode"
+71 |       const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+72 | 
+73 |       // then returns default ~/.config/opencode
+74 |       expect(result).toBe(join(homedir(), ".config", "opencode"))
+                          ^
+error: expect(received).toBe(expected)
+
+Expected: "/Users/uther/.config/opencode"
+Received: "/Volumes/Data/opencode-data/home/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:74:22)
+(fail) opencode-config-dir > OPENCODE_CONFIG_DIR environment variable > falls back to default when env var is empty string [0.14ms]
+82 | 
+83 |       // when getOpenCodeConfigDir is called with binary="opencode"
+84 |       const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+85 | 
+86 |       // then returns default ~/.config/opencode
+87 |       expect(result).toBe(join(homedir(), ".config", "opencode"))
+                          ^
+error: expect(received).toBe(expected)
+
+Expected: "/Users/uther/.config/opencode"
+Received: "/Volumes/Data/opencode-data/home/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:87:22)
+(fail) opencode-config-dir > OPENCODE_CONFIG_DIR environment variable > falls back to default when env var is whitespace only [0.11ms]
+148 | 
+149 |         // when getOpenCodeConfigDir is called with binary="opencode"
+150 |         const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+151 | 
+152 |         // then returns ~/.config/opencode
+153 |         expect(result).toBe(join(homedir(), ".config", "opencode"))
+                             ^
+error: expect(received).toBe(expected)
+
+Expected: "/Users/uther/.config/opencode"
+Received: "/Volumes/Data/opencode-data/home/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:153:24)
+(fail) opencode-config-dir > getOpenCodeConfigDir > for opencode CLI binary > returns ~/.config/opencode on Linux [0.11ms]
+174 | 
+175 |         // when getOpenCodeConfigDir is called with binary="opencode"
+176 |         const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+177 | 
+178 |         // then returns ~/.config/opencode
+179 |         expect(result).toBe(join(homedir(), ".config", "opencode"))
+                             ^
+error: expect(received).toBe(expected)
+
+Expected: "/Users/uther/.config/opencode"
+Received: "/Volumes/Data/opencode-data/home/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:179:24)
+(fail) opencode-config-dir > getOpenCodeConfigDir > for opencode CLI binary > returns ~/.config/opencode on macOS [0.11ms]
+188 | 
+189 |         // when getOpenCodeConfigDir is called with binary="opencode"
+190 |         const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200", checkExisting: false })
+191 | 
+192 |         // then returns ~/.config/opencode (cross-platform default)
+193 |         expect(result).toBe(join(homedir(), ".config", "opencode"))
+                             ^
+error: expect(received).toBe(expected)
+
+Expected: "/Users/uther/.config/opencode"
+Received: "/Volumes/Data/opencode-data/home/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:193:24)
+(fail) opencode-config-dir > getOpenCodeConfigDir > for opencode CLI binary > returns ~/.config/opencode on Windows by default [0.11ms]
+203 | 
+204 |         // when getOpenCodeConfigDir is called with binary="opencode"
+205 |         const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200", checkExisting: false })
+206 | 
+207 |         // then returns ~/.config/opencode (ignores APPDATA entirely for CLI)
+208 |         expect(result).toBe(join(homedir(), ".config", "opencode"))
+                             ^
+error: expect(received).toBe(expected)
+
+Expected: "/Users/uther/.config/opencode"
+Received: "/Volumes/Data/opencode-data/home/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:208:24)
+(fail) opencode-config-dir > getOpenCodeConfigDir > for opencode CLI binary > returns ~/.config/opencode on Windows even when APPDATA is set (#2502) [0.11ms]
+283 |       // when getOpenCodeConfigPaths is called
+284 |       const paths = getOpenCodeConfigPaths({ binary: "opencode", version: "1.0.200" })
+285 | 
+286 |       // then returns all expected paths
+287 |       const expectedDir = join(homedir(), ".config", "opencode")
+288 |       expect(paths.configDir).toBe(expectedDir)
+                                    ^
+error: expect(received).toBe(expected)
+
+Expected: "/Users/uther/.config/opencode"
+Received: "/Volumes/Data/opencode-data/home/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:288:31)
+(fail) opencode-config-dir > getOpenCodeConfigPaths > returns all config paths for CLI binary [0.13ms]
+
+web/e2e/example.spec.ts:
+
+# Unhandled error between tests
+-------------------------------
+70 |     this.test = test;
+71 |   }
+72 |   _currentSuite(location, title) {
+73 |     const suite = (0, import_globals.currentlyLoadingFileSuite)();
+74 |     if (!suite) {
+75 |       throw new Error([
+                     ^
+error: Playwright Test did not expect test.describe() to be called here.
+Most common reasons include:
+- You are calling test.describe() in a configuration file.
+- You are calling test.describe() in a file that is imported by the configuration file.
+- You have two different versions of @playwright/test. This usually happens
+  when one of the dependencies in your package.json depends on @playwright/test.
+      at _currentSuite (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/node_modules/playwright/lib/common/testType.js:75:17)
+      at _describe (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/node_modules/playwright/lib/common/testType.js:115:24)
+      at /Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/e2e/example.spec.ts:3:6
+-------------------------------
+
+
+web/e2e/hello-world.spec.ts:
+
+# Unhandled error between tests
+-------------------------------
+70 |     this.test = test;
+71 |   }
+72 |   _currentSuite(location, title) {
+73 |     const suite = (0, import_globals.currentlyLoadingFileSuite)();
+74 |     if (!suite) {
+75 |       throw new Error([
+                     ^
+error: Playwright Test did not expect test() to be called here.
+Most common reasons include:
+- You are calling test() in a configuration file.
+- You are calling test() in a file that is imported by the configuration file.
+- You have two different versions of @playwright/test. This usually happens
+  when one of the dependencies in your package.json depends on @playwright/test.
+      at _currentSuite (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/node_modules/playwright/lib/common/testType.js:75:17)
+      at _createTest (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/node_modules/playwright/lib/common/testType.js:88:24)
+      at /Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/e2e/hello-world.spec.ts:3:1
+-------------------------------
+
+
+web/e2e/hero-stats.spec.ts:
+
+# Unhandled error between tests
+-------------------------------
+70 |     this.test = test;
+71 |   }
+72 |   _currentSuite(location, title) {
+73 |     const suite = (0, import_globals.currentlyLoadingFileSuite)();
+74 |     if (!suite) {
+75 |       throw new Error([
+                     ^
+error: Playwright Test did not expect test.describe() to be called here.
+Most common reasons include:
+- You are calling test.describe() in a configuration file.
+- You are calling test.describe() in a file that is imported by the configuration file.
+- You have two different versions of @playwright/test. This usually happens
+  when one of the dependencies in your package.json depends on @playwright/test.
+      at _currentSuite (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/node_modules/playwright/lib/common/testType.js:75:17)
+      at _describe (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/node_modules/playwright/lib/common/testType.js:115:24)
+      at /Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/web/e2e/hero-stats.spec.ts:3:6
+-------------------------------
+
+
+src/features/boulder-state/storage.test.ts:
+[boulder-state] writeBoulderWork: work "test-work-001" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "good" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "plan-legacy" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "orphan-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "orphan-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+
+  [36m⚙[39m [1mread_file[22m [2mfilePath=/src/index.ts[22m  
+
+src/cli/run/continuation-state.json-backend.test.ts:
+[boulder-state] writeBoulderWork: work "json-random-id-plan-legacy" has 1 session(s) but empty session_origins
+
+src/cli/boulder/boulder.test.ts:
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "orphan-work" has 1 session(s) but empty session_origins
+
+src/__tests__/perf/plugin-init.test.ts:
+empty-project: cold=31.1ms warm=[13.7, 13.8] median=13.8ms
+in-tree-fixture: cold=29.2ms warm=[14.3, 10.8] median=14.3ms
+
+src/hooks/prometheus-md-only/index.test.ts:
+[boulder-state] writeBoulderWork: work "test-plan-legacy" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-plan-legacy" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-plan-legacy" has 1 session(s) but empty session_origins
+
+src/hooks/start-work/index.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-other" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-target" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/tool-execute-after-task-timers.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/final-wave-approval-gate.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/background-task-retry.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/index.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/compaction-agent-filter.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/idle-event-lineage.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/idle-event-persisted-lineage.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/idle-event-complete-boulder.test.ts:
+[boulder-state] writeBoulderWork: work "work-complete" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/tool-execute-after-background-launch.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/resolve-active-boulder-session.test.ts:
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/final-wave-approval-gate-regression.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+ 6723 pass
+ 1 skip
+ 17 fail
+ 3 errors
+ 24 snapshots, 15277 expect() calls
+Ran 6741 tests across 695 files. [137.61s]
+===== EXIT CODE: 1 =====
+
+===== COMMAND: bun run typecheck =====
+$ tsc --noEmit
+===== EXIT CODE: 0 =====
+
+===== COMMAND: bun run build =====
+$ bun build src/index.ts --outdir dist --target bun --format esm --external @ast-grep/napi --external zod && bun run build:node-require-shim && tsc --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm --external @ast-grep/napi && bun run build:schema
+Bundled 1326 modules in 52ms
+
+  index.js  4.52 MB  (entry point)
+
+$ bun run script/patch-node-require-shim.ts
+Patched Node/Electron require shim in dist/index.js
+Bundled 540 modules in 30ms
+
+  index.js  2.31 MB  (entry point)
+
+$ bun run script/build-schema.ts
+Generating JSON Schema...
+✓ JSON Schema generated: assets/oh-my-opencode.schema.json
+===== EXIT CODE: 0 =====
+
+Removing temporary boulder-multi-session evidence symlink.
+Removing temporary web/node_modules directory.
+Removing temporary node_modules symlink.
+
+Task 8 full verification completed at 2026-05-16 00:57:49 +0800
+OVERALL_EXIT_CODE=1
+
+
+===== FALLBACK REPOSITORY-SCOPED FULL VERIFICATION =====
+Started at 2026-05-16 00:59:09 +0800
+Reason: raw `bun test` discovers web/e2e Playwright specs outside package.json test scope and resolves existing user config realpath; repository package script scopes tests to `bin script src`.
+node_modules: missing; creating temporary symlink from boulder-multi-session.
+boulder-multi-session evidence fixture: missing; creating temporary symlink.
+
+===== COMMAND: bun test bin script src =====
+bun test v1.3.14 (0d9b296a)
+
+src/plugin/chat-params.test.ts:
+283 |     //#when
+284 |     await handler(input, output)
+285 | 
+286 |     //#then
+287 |     expect(output.maxOutputTokens).toBe(4096)
+288 |     expect(logSpy).toHaveBeenCalledWith(
+                         ^
+error: expect(received).toHaveBeenCalledWith(...expected)
+
+Expected: [ "[plugin] maxOutputTokens=0 is non-positive; using safe fallback 4096" ]
+But it was not called.
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/chat-params.test.ts:288:20)
+(fail) createChatParamsHandler > falls back to default maxOutputTokens when stored and compatibility tokens are non-positive [0.62ms]
+
+src/plugin/ultrawork-db-model-override.test.ts:
+116 |     )
+117 |     await flushMicrotasks(5)
+118 | 
+119 |     //#then
+120 |     const model = readMessageModel("msg_001")
+121 |     expect(model).toEqual({ providerID: "anthropic", modelID: "claude-opus-4-7" })
+                        ^
+error: expect(received).toEqual(expected)
+
+@@ -1,3 +1,3 @@
+  {
+-   "modelID": "claude-opus-4-7",
++   "modelID": "claude-sonnet-4-6",
+    "providerID": "anthropic",
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:121:19)
+(fail) scheduleDeferredModelOverride > should update model in DB after microtask flushes [17.03ms]
+132 |       "max",
+133 |     )
+134 |     await flushMicrotasks(5)
+135 | 
+136 |     //#then
+137 |     expect(readMessageField("msg_002", "variant")).toBe("max")
+                                                         ^
+error: expect(received).toBe(expected)
+
+Expected: "max"
+Received: null
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:137:52)
+(fail) scheduleDeferredModelOverride > should update variant and thinking fields when variant provided [16.08ms]
+166 |     )
+167 |     await flushMicrotasks(5)
+168 | 
+169 |     //#then
+170 |     const model = readMessageModel("msg_003")
+171 |     expect(model).toEqual({ providerID: "anthropic", modelID: "claude-opus-4-7" })
+                        ^
+error: expect(received).toEqual(expected)
+
+@@ -1,3 +1,3 @@
+  {
+-   "modelID": "claude-opus-4-7",
++   "modelID": "claude-sonnet-4-6",
+    "providerID": "anthropic",
+
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:171:19)
+(fail) scheduleDeferredModelOverride > should not update variant fields when variant is undefined [16.12ms]
+183 |       { providerID: "anthropic", modelID: "claude-opus-4-7" },
+184 |     )
+185 |     await flushMicrotasks(5)
+186 | 
+187 |     //#then
+188 |     expect(logSpy).toHaveBeenCalledWith(
+                         ^
+error: expect(received).toHaveBeenCalledWith(...expected)
+
+Expected: [
+  StringContaining "DB not found"
+]
+But it was not called.
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:188:20)
+(fail) scheduleDeferredModelOverride > should not crash when DB path does not exist [13.89ms]
+213 |       )
+214 |       && isRecord(metadata)
+215 |       && metadata.messageId === "msg_corrupt"
+216 |     )
+217 | 
+218 |     expect(failureCall).toBeDefined()
+                              ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/plugin/ultrawork-db-model-override.test.ts:218:25)
+(fail) scheduleDeferredModelOverride > should log a DB failure when DB file exists but is corrupted [13.98ms]
+
+src/shared/opencode-config-dir.test.ts:
+56 | 
+57 |       // when getOpenCodeConfigDir is called with binary="opencode"
+58 |       const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+59 | 
+60 |       // then returns default ~/.config/opencode
+61 |       expect(result).toBe(join(homedir(), ".config", "opencode"))
+                          ^
+error: expect(received).toBe(expected)
+
+Expected: "/tmp/omo-task-8-home-19253/.config/opencode"
+Received: "/private/tmp/omo-task-8-home-19253/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:61:22)
+(fail) opencode-config-dir > OPENCODE_CONFIG_DIR environment variable > falls back to default when env var is not set [1.02ms]
+69 | 
+70 |       // when getOpenCodeConfigDir is called with binary="opencode"
+71 |       const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+72 | 
+73 |       // then returns default ~/.config/opencode
+74 |       expect(result).toBe(join(homedir(), ".config", "opencode"))
+                          ^
+error: expect(received).toBe(expected)
+
+Expected: "/tmp/omo-task-8-home-19253/.config/opencode"
+Received: "/private/tmp/omo-task-8-home-19253/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:74:22)
+(fail) opencode-config-dir > OPENCODE_CONFIG_DIR environment variable > falls back to default when env var is empty string [0.19ms]
+82 | 
+83 |       // when getOpenCodeConfigDir is called with binary="opencode"
+84 |       const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+85 | 
+86 |       // then returns default ~/.config/opencode
+87 |       expect(result).toBe(join(homedir(), ".config", "opencode"))
+                          ^
+error: expect(received).toBe(expected)
+
+Expected: "/tmp/omo-task-8-home-19253/.config/opencode"
+Received: "/private/tmp/omo-task-8-home-19253/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:87:22)
+(fail) opencode-config-dir > OPENCODE_CONFIG_DIR environment variable > falls back to default when env var is whitespace only [0.13ms]
+148 | 
+149 |         // when getOpenCodeConfigDir is called with binary="opencode"
+150 |         const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+151 | 
+152 |         // then returns ~/.config/opencode
+153 |         expect(result).toBe(join(homedir(), ".config", "opencode"))
+                             ^
+error: expect(received).toBe(expected)
+
+Expected: "/tmp/omo-task-8-home-19253/.config/opencode"
+Received: "/private/tmp/omo-task-8-home-19253/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:153:24)
+(fail) opencode-config-dir > getOpenCodeConfigDir > for opencode CLI binary > returns ~/.config/opencode on Linux [0.12ms]
+174 | 
+175 |         // when getOpenCodeConfigDir is called with binary="opencode"
+176 |         const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200" })
+177 | 
+178 |         // then returns ~/.config/opencode
+179 |         expect(result).toBe(join(homedir(), ".config", "opencode"))
+                             ^
+error: expect(received).toBe(expected)
+
+Expected: "/tmp/omo-task-8-home-19253/.config/opencode"
+Received: "/private/tmp/omo-task-8-home-19253/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:179:24)
+(fail) opencode-config-dir > getOpenCodeConfigDir > for opencode CLI binary > returns ~/.config/opencode on macOS [0.12ms]
+188 | 
+189 |         // when getOpenCodeConfigDir is called with binary="opencode"
+190 |         const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200", checkExisting: false })
+191 | 
+192 |         // then returns ~/.config/opencode (cross-platform default)
+193 |         expect(result).toBe(join(homedir(), ".config", "opencode"))
+                             ^
+error: expect(received).toBe(expected)
+
+Expected: "/tmp/omo-task-8-home-19253/.config/opencode"
+Received: "/private/tmp/omo-task-8-home-19253/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:193:24)
+(fail) opencode-config-dir > getOpenCodeConfigDir > for opencode CLI binary > returns ~/.config/opencode on Windows by default [0.13ms]
+203 | 
+204 |         // when getOpenCodeConfigDir is called with binary="opencode"
+205 |         const result = getOpenCodeConfigDir({ binary: "opencode", version: "1.0.200", checkExisting: false })
+206 | 
+207 |         // then returns ~/.config/opencode (ignores APPDATA entirely for CLI)
+208 |         expect(result).toBe(join(homedir(), ".config", "opencode"))
+                             ^
+error: expect(received).toBe(expected)
+
+Expected: "/tmp/omo-task-8-home-19253/.config/opencode"
+Received: "/private/tmp/omo-task-8-home-19253/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:208:24)
+(fail) opencode-config-dir > getOpenCodeConfigDir > for opencode CLI binary > returns ~/.config/opencode on Windows even when APPDATA is set (#2502) [0.12ms]
+283 |       // when getOpenCodeConfigPaths is called
+284 |       const paths = getOpenCodeConfigPaths({ binary: "opencode", version: "1.0.200" })
+285 | 
+286 |       // then returns all expected paths
+287 |       const expectedDir = join(homedir(), ".config", "opencode")
+288 |       expect(paths.configDir).toBe(expectedDir)
+                                    ^
+error: expect(received).toBe(expected)
+
+Expected: "/tmp/omo-task-8-home-19253/.config/opencode"
+Received: "/private/tmp/omo-task-8-home-19253/.config/opencode"
+
+      at <anonymous> (/Volumes/Data/code/worktrees/oh-my-openagent/boulder-start-work-session-isolation-fix/src/shared/opencode-config-dir.test.ts:288:31)
+(fail) opencode-config-dir > getOpenCodeConfigPaths > returns all config paths for CLI binary [0.14ms]
+
+src/features/boulder-state/storage.test.ts:
+[boulder-state] writeBoulderWork: work "test-work-001" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "good" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "plan-legacy" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "orphan-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "orphan-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-concurrent" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+
+  [36m⚙[39m [1mread_file[22m [2mfilePath=/src/index.ts[22m  
+
+src/cli/run/continuation-state.json-backend.test.ts:
+[boulder-state] writeBoulderWork: work "json-random-id-plan-legacy" has 1 session(s) but empty session_origins
+
+src/cli/boulder/boulder.test.ts:
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-alpha" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-beta" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "orphan-work" has 1 session(s) but empty session_origins
+
+src/__tests__/perf/plugin-init.test.ts:
+empty-project: cold=19.9ms warm=[1.4, 2.9] median=2.9ms
+in-tree-fixture: cold=15.2ms warm=[1.2, 3.9] median=3.9ms
+
+src/hooks/prometheus-md-only/index.test.ts:
+[boulder-state] writeBoulderWork: work "test-plan-legacy" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-plan-legacy" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-plan-legacy" has 1 session(s) but empty session_origins
+
+src/hooks/start-work/index.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-other" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-target" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/tool-execute-after-task-timers.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/final-wave-approval-gate.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/background-task-retry.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/index.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 2 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/compaction-agent-filter.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/idle-event-lineage.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/idle-event-persisted-lineage.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/idle-event-complete-boulder.test.ts:
+[boulder-state] writeBoulderWork: work "work-complete" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/tool-execute-after-background-launch.test.ts:
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-1" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/resolve-active-boulder-session.test.ts:
+[boulder-state] writeBoulderWork: work "work-a" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "work-b" has 1 session(s) but empty session_origins
+
+src/hooks/atlas/final-wave-approval-gate-regression.test.ts:
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+[boulder-state] writeBoulderWork: work "test-work" has 1 session(s) but empty session_origins
+
+ 6723 pass
+ 1 skip
+ 14 fail
+ 24 snapshots, 15277 expect() calls
+Ran 6738 tests across 692 files. [138.02s]
+===== EXIT CODE: 1 =====
+
+===== COMMAND: bun run typecheck =====
+$ tsc --noEmit
+===== EXIT CODE: 0 =====
+
+===== COMMAND: bun run build =====
+$ bun build src/index.ts --outdir dist --target bun --format esm --external @ast-grep/napi --external zod && bun run build:node-require-shim && tsc --emitDeclarationOnly && bun build src/cli/index.ts --outdir dist/cli --target bun --format esm --external @ast-grep/napi && bun run build:schema
+Bundled 1326 modules in 69ms
+
+  index.js  4.52 MB  (entry point)
+
+$ bun run script/patch-node-require-shim.ts
+Patched Node/Electron require shim in dist/index.js
+Bundled 540 modules in 40ms
+
+  index.js  2.31 MB  (entry point)
+
+$ bun run script/build-schema.ts
+Generating JSON Schema...
+✓ JSON Schema generated: assets/oh-my-opencode.schema.json
+===== EXIT CODE: 0 =====
+Fallback scoped verification completed at 2026-05-16 01:01:36 +0800
+FALLBACK_SCOPED_OVERALL_EXIT_CODE=1
