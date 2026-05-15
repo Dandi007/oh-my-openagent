@@ -16,14 +16,14 @@ export const START_WORK_TEMPLATE = `You are starting a Sisyphus work session.
 2. **Check for active boulder state**: Read \`.sisyphus/boulder/\` directory if it exists (v3 multi-file storage)
 
 3. **Decision logic**:
-   - If multiple active works are listed in your context:
-     - This means the boulder directory has more than one work with status: \`active\` or \`paused\`
-     - Use the Question tool to ask the user which plan to resume
-     - Resume by running \`/start-work {plan-name}\` for the selected plan
-     - If the user says "start a new plan", continue with cold-start auto-selection logic
-   - If exactly one active work is listed and the user did not name a plan:
-     - Auto-resume that single active work
-   - If no active plan OR plan is complete:
+   - If the current session is already bound to an active or paused work:
+     - Resume that exact work — the session is already tracked in its \`session_ids\`
+     - Do NOT append the session again; it is already present
+   - If the current session is NOT bound to any work AND active/paused works exist:
+     - List the active/paused works and ask the user to select one
+     - The user MUST specify an explicit plan: \`/start-work <plan-name>\`
+     - Do NOT auto-resume any work — the current session is unbound
+   - If no active or paused works exist:
      - List available plan files
      - If ONE plan: auto-select it
      - If MULTIPLE plans: show list with timestamps, ask user to select
@@ -69,7 +69,7 @@ Resuming Work Session
 
 Active Plan: {plan-name}
 Progress: {completed}/{total} tasks
-Sessions: {count} (appending current session)
+Sessions: {count} (current session already tracked)
 Worktree: {worktree_path}
 
 Reading plan and continuing from last incomplete task...
