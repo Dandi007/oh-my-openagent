@@ -12,6 +12,8 @@ import {
   writeBoulderState,
   clearBoulderState,
   readBoulderState,
+  readBoulderIndex,
+  getWorkForSession,
 } from "../../features/boulder-state"
 import type { BoulderState, BoulderWorkState } from "../../features/boulder-state"
 import * as sessionState from "../../features/claude-code-session-state"
@@ -168,8 +170,8 @@ You are starting a Sisyphus work session.
       expect(output.parts[0].text).toContain("---")
     })
 
-    test("should inject resume info when existing boulder state found", async () => {
-      // given - existing boulder state with incomplete plan
+    test("should NOT auto-resume when existing boulder state found but current session is unbound", async () => {
+      // given - existing boulder state with session "session-1", current session is "session-123" (unbound)
       const planPath = join(testDir, "test-plan.md")
       writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [x] Task 2")
 
@@ -186,7 +188,46 @@ You are starting a Sisyphus work session.
         parts: [{ type: "text", text: createStartWorkPrompt() }],
       }
 
-      // when
+      // when - no-arg /start-work with unbound session
+      await hook["chat.message"](
+        { sessionID: "session-123" },
+        output
+      )
+
+      // then - should NOT show resuming status since session-123 is not in session_ids
+      expect(output.parts[0].text).not.toContain("RESUMING")
+      expect(output.parts[0].text).not.toContain("current session appended")
+
+      // Verify no state mutation: session_ids unchanged
+      const updatedState = readBoulderState(testDir)
+      const work = updatedState ? Object.values(updatedState.works)[0] : undefined
+      expect(work?.session_ids).not.toContain("session-123")
+      expect(work?.session_ids).toEqual(["session-1"])
+
+      // Verify index unchanged
+      const index = readBoulderIndex(testDir)
+      expect(index?.sessions["session-123"]).toBeUndefined()
+    })
+
+    test("should resume when current session is already in the work's session_ids", async () => {
+      // given - existing boulder state where current session IS in session_ids
+      const planPath = join(testDir, "test-plan.md")
+      writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [x] Task 2")
+
+      const state = createTestBoulderState({
+        active_plan: planPath,
+        started_at: "2026-01-02T10:00:00Z",
+        session_ids: ["session-123"],
+        plan_name: "test-plan",
+      })
+      writeBoulderState(testDir, state)
+
+      const hook = createStartWorkHook(createMockPluginInput())
+      const output = {
+        parts: [{ type: "text", text: createStartWorkPrompt() }],
+      }
+
+      // when - no-arg /start-work with session already in the work
       await hook["chat.message"](
         { sessionID: "session-123" },
         output
@@ -195,6 +236,50 @@ You are starting a Sisyphus work session.
       // then - should show resuming status
       expect(output.parts[0].text).toContain("RESUMING")
       expect(output.parts[0].text).toContain("test-plan")
+
+      // Verify no duplicate session id
+      const updatedState = readBoulderState(testDir)
+      const work = updatedState ? Object.values(updatedState.works)[0] : undefined
+      const sessionCount = work?.session_ids.filter((s) => s === "session-123").length ?? 0
+      expect(sessionCount).toBe(1)
+    })
+
+    test("should NOT auto-resume when current session is not in the work's session_ids", async () => {
+      // given - existing boulder state with session "old-session", current is "session-new" (unbound)
+      const planPath = join(testDir, "test-plan.md")
+      writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [x] Task 2")
+
+      const state = createTestBoulderState({
+        active_plan: planPath,
+        started_at: "2026-01-02T10:00:00Z",
+        session_ids: ["old-session"],
+        plan_name: "test-plan",
+      })
+      writeBoulderState(testDir, state)
+
+      const hook = createStartWorkHook(createMockPluginInput())
+      const output = {
+        parts: [{ type: "text", text: createStartWorkPrompt() }],
+      }
+
+      // when - no-arg /start-work with unbound session
+      await hook["chat.message"](
+        { sessionID: "session-new" },
+        output
+      )
+
+      // then - should NOT resume, should NOT mutate state
+      expect(output.parts[0].text).not.toContain("RESUMING")
+      expect(output.parts[0].text).not.toContain("current session appended")
+
+      // Verify getWorkForSession returns null for the unbound session
+      const boundWork = getWorkForSession(testDir, "session-new")
+      expect(boundWork).toBeNull()
+
+      // Verify the old session is still bound
+      const oldWork = getWorkForSession(testDir, "old-session")
+      expect(oldWork).not.toBeNull()
+      expect(oldWork?.plan_name).toBe("test-plan")
     })
 
     test("should replace $SESSION_ID placeholder", async () => {
@@ -729,7 +814,7 @@ You are starting a Sisyphus work session.
       writeBoulderState(testDir, createTestBoulderState({
         active_plan: planPath,
         started_at: "2026-01-02T10:00:00Z",
-        session_ids: ["old-session"],
+        session_ids: ["ses-prometheus-resume"],
         plan_name: "resume-plan",
         agent: "prometheus",
       }))
@@ -885,6 +970,130 @@ You are starting a Sisyphus work session.
     })
   })
 
+  describe("command.execute.before handler", () => {
+    test("#given unbound CLI session and active work #when command.execute.before runs #then Boulder continuation is not injected", async () => {
+      // given
+      const activePlanPath = join(testDir, "active-plan.md")
+      writeFileSync(activePlanPath, "# Active Plan\n- [ ] Task 1\n- [x] Task 2")
+      writeBoulderState(testDir, createTestBoulderState({
+        active_plan: activePlanPath,
+        started_at: "2026-01-02T10:00:00Z",
+        session_ids: ["session-bound-to-other-work"],
+        plan_name: "active-plan",
+        agent: "atlas",
+      }))
+
+      const promptAsyncMock = spyOn({
+        promptAsync: async (_request: unknown) => undefined,
+      }, "promptAsync")
+      const hook = createStartWorkHook({
+        directory: testDir,
+        client: {
+          session: {
+            promptAsync: promptAsyncMock,
+          },
+        },
+      } as unknown as Parameters<typeof createStartWorkHook>[0])
+      const output = {
+        message: {} as Record<string, unknown>,
+        parts: [{ type: "text", text: createStartWorkPrompt() }],
+      }
+
+      try {
+        // when
+        await hook["command.execute.before"]({
+          sessionID: "session-cli-unbound",
+          command: "start-work",
+          arguments: "",
+        }, output)
+
+        // then
+        expect(output.parts[0].text).toContain("Active Work Selection Required")
+        expect(output.parts[0].text).not.toContain("RESUMING")
+        expect(promptAsyncMock).not.toHaveBeenCalled()
+      } finally {
+        promptAsyncMock.mockRestore()
+      }
+    })
+
+    test("#given CLI session bound to one active work #when command.execute.before runs #then that exact work continues", async () => {
+      // given
+      const otherPlanPath = join(testDir, "other-plan.md")
+      const targetPlanPath = join(testDir, "target-plan.md")
+      writeFileSync(otherPlanPath, "# Other Plan\n- [ ] Other Task")
+      writeFileSync(targetPlanPath, "# Target Plan\n- [ ] Task 1\n- [ ] Task 2")
+      writeBoulderState(testDir, {
+        schema_version: 3,
+        works: {
+          "work-other": {
+            work_id: "work-other",
+            status: "active",
+            active_plan: otherPlanPath,
+            started_at: "2026-01-02T10:00:00Z",
+            updated_at: "2026-01-02T10:01:00Z",
+            session_ids: ["session-other"],
+            plan_name: "other-plan",
+            agent: "atlas",
+          },
+          "work-target": {
+            work_id: "work-target",
+            status: "active",
+            active_plan: targetPlanPath,
+            started_at: "2026-01-02T10:02:00Z",
+            updated_at: "2026-01-02T10:03:00Z",
+            session_ids: ["session-cli-bound"],
+            plan_name: "target-plan",
+            agent: "atlas",
+          },
+        },
+      })
+
+      const promptAsyncMock = spyOn({
+        promptAsync: async (_request: unknown) => undefined,
+      }, "promptAsync")
+      const hook = createStartWorkHook({
+        directory: testDir,
+        client: {
+          session: {
+            promptAsync: promptAsyncMock,
+          },
+        },
+      } as unknown as Parameters<typeof createStartWorkHook>[0])
+      const output = {
+        message: {} as Record<string, unknown>,
+        parts: [{ type: "text", text: createStartWorkPrompt() }],
+      }
+
+      try {
+        // when
+        await hook["command.execute.before"]({
+          sessionID: "session-cli-bound",
+          command: "start-work",
+          arguments: "",
+        }, output)
+
+        // then
+        expect(output.parts[0].text).toContain("RESUMING")
+        expect(output.parts[0].text).toContain("target-plan")
+        expect(output.parts[0].text).not.toContain("other-plan")
+        expect(promptAsyncMock).toHaveBeenCalledTimes(1)
+        const request = promptAsyncMock.mock.calls[0][0] as {
+          path: { id: string }
+          body: { agent: string; parts: unknown[] }
+          query: { directory: string }
+        }
+        expect(request.path.id).toBe("session-cli-bound")
+        expect(request.query.directory).toBe(testDir)
+        expect(request.body.agent).toBe("atlas")
+        const continuationPayload = JSON.stringify(request.body.parts)
+        expect(continuationPayload).toContain("target-plan")
+        expect(continuationPayload).not.toContain("other-plan")
+      } finally {
+        promptAsyncMock.mockRestore()
+      }
+    })
+  })
+
   describe("worktree support", () => {
     let detectSpy: ReturnType<typeof spyOn>
 
@@ -987,7 +1196,7 @@ You are starting a Sisyphus work session.
       const existingState: BoulderState = createTestBoulderState({
         active_plan: planPath,
         started_at: "2026-01-01T00:00:00Z",
-        session_ids: ["old-session"],
+        session_ids: ["session-456"],
         plan_name: "plan",
         worktree_path: "/old/wt",
       })
@@ -1015,7 +1224,7 @@ You are starting a Sisyphus work session.
       const existingState: BoulderState = createTestBoulderState({
         active_plan: planPath,
         started_at: "2026-01-01T00:00:00Z",
-        session_ids: ["old-session"],
+        session_ids: ["session-789"],
         plan_name: "plan",
         worktree_path: "/existing/wt",
       })
@@ -1048,7 +1257,7 @@ You are starting a Sisyphus work session.
       writeBoulderState(testDir, createTestBoulderState({
         active_plan: mainPlanPath,
         started_at: "2026-01-01T00:00:00Z",
-        session_ids: ["old-session"],
+        session_ids: ["session-worktree-progress"],
         plan_name: "resume-worktree-plan",
         worktree_path: worktreeDir,
       }))
