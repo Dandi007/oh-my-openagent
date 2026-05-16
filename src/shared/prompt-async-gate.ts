@@ -217,7 +217,8 @@ export async function promptAsyncAfterSessionIdle<TInput = PromptAsyncInput>(arg
   } = args
   const postDispatchHoldMs = args.postDispatchHoldMs ?? DEFAULT_PROMPT_ASYNC_POST_DISPATCH_HOLD_MS
   const dispatchTimeoutMs = args.dispatchTimeoutMs ?? DEFAULT_PROMPT_DISPATCH_TIMEOUT_MS
-  const promptAsync = client.session?.promptAsync
+  const session = client.session
+  const promptAsync = session?.promptAsync
 
   if (typeof promptAsync !== "function") {
     log("[prompt-async-gate] promptAsync unavailable", { sessionID, source })
@@ -234,7 +235,8 @@ export async function promptAsyncAfterSessionIdle<TInput = PromptAsyncInput>(arg
     postDispatchHoldMs,
     dispatchTimeoutMs,
     checkStatus: args.checkStatus !== false,
-    dispatch: (dispatchInput) => promptAsync(dispatchInput),
+    // Preserve `this` so SDK class methods (which dereference `this._client`) work correctly.
+    dispatch: (dispatchInput) => promptAsync.call(session, dispatchInput),
   })
 }
 
@@ -257,7 +259,8 @@ export async function promptAfterSessionIdle<TInput = PromptAsyncInput>(args: {
   } = args
   const postDispatchHoldMs = args.postDispatchHoldMs ?? DEFAULT_PROMPT_ASYNC_POST_DISPATCH_HOLD_MS
   const dispatchTimeoutMs = args.dispatchTimeoutMs ?? DEFAULT_PROMPT_DISPATCH_TIMEOUT_MS
-  const prompt = client.session?.prompt
+  const session = client.session
+  const prompt = session?.prompt
 
   if (typeof prompt !== "function") {
     log("[prompt-async-gate] prompt unavailable", { sessionID, source })
@@ -274,7 +277,8 @@ export async function promptAfterSessionIdle<TInput = PromptAsyncInput>(args: {
     postDispatchHoldMs,
     dispatchTimeoutMs,
     checkStatus: args.checkStatus !== false,
-    dispatch: (dispatchInput) => prompt(dispatchInput),
+    // Preserve `this` so SDK class methods (which dereference `this._client`) work correctly.
+    dispatch: (dispatchInput) => prompt.call(session, dispatchInput),
   })
 }
 
