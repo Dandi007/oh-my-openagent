@@ -1,4 +1,5 @@
 import { Command } from "commander"
+import { fileURLToPath } from "node:url"
 import { install } from "./install"
 import { run } from "./run"
 import { getLocalVersion } from "./get-local-version"
@@ -6,13 +7,15 @@ import { doctor } from "./doctor"
 import { refreshModelCapabilities } from "./refresh-model-capabilities"
 import { createMcpOAuthCommand } from "./mcp-oauth"
 import { boulder } from "./boulder"
+import { getObservableVersionFromPackageJsonPath } from "../shared/observable-version"
 import type { InstallArgs } from "./types"
 import type { RunOptions } from "./run"
 import type { GetLocalVersionOptions } from "./get-local-version/types"
 import type { DoctorOptions } from "./doctor"
 import packageJson from "../../package.json" with { type: "json" }
 
-const VERSION = packageJson.version
+const PACKAGE_JSON_PATH = fileURLToPath(new URL("../../package.json", import.meta.url))
+const VERSION = getObservableVersionFromPackageJsonPath(PACKAGE_JSON_PATH) ?? packageJson.version
 
 const program = new Command()
 
