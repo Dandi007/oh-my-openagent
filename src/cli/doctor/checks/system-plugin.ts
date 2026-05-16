@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 
 import { LEGACY_PLUGIN_NAME, PLUGIN_NAME, getOpenCodeConfigPaths, parseJsonc } from "../../../shared"
 
@@ -9,6 +10,7 @@ export interface PluginInfo {
   isPinned: boolean
   pinnedVersion: string | null
   isLocalDev: boolean
+  localDevPath: string | null
 }
 
 interface OpenCodeConfigShape {
@@ -36,16 +38,24 @@ function parsePluginVersion(entry: string): string | null {
   return null
 }
 
-function findPluginEntry(entries: string[]): { entry: string; isLocalDev: boolean } | null {
+function parseLocalDevPath(entry: string): string | null {
+  try {
+    return fileURLToPath(entry)
+  } catch {
+    return entry.replace("file://", "")
+  }
+}
+
+function findPluginEntry(entries: string[]): { entry: string; isLocalDev: boolean; localDevPath: string | null } | null {
   for (const entry of entries) {
     if (entry === PLUGIN_NAME || entry.startsWith(`${PLUGIN_NAME}@`)) {
-      return { entry, isLocalDev: false }
+      return { entry, isLocalDev: false, localDevPath: null }
     }
     if (entry === LEGACY_PLUGIN_NAME || entry.startsWith(`${LEGACY_PLUGIN_NAME}@`)) {
-      return { entry, isLocalDev: false }
+      return { entry, isLocalDev: false, localDevPath: null }
     }
     if (entry.startsWith("file://") && (entry.includes(PLUGIN_NAME) || entry.includes(LEGACY_PLUGIN_NAME))) {
-      return { entry, isLocalDev: true }
+      return { entry, isLocalDev: true, localDevPath: parseLocalDevPath(entry) }
     }
   }
 
@@ -62,6 +72,7 @@ export function getPluginInfo(): PluginInfo {
       isPinned: false,
       pinnedVersion: null,
       isLocalDev: false,
+      localDevPath: null,
     }
   }
 
@@ -77,6 +88,7 @@ export function getPluginInfo(): PluginInfo {
         isPinned: false,
         pinnedVersion: null,
         isLocalDev: false,
+        localDevPath: null,
       }
     }
 
@@ -88,6 +100,7 @@ export function getPluginInfo(): PluginInfo {
       isPinned: pinnedVersion !== null && /^\d+\.\d+\.\d+/.test(pinnedVersion ?? ""),
       pinnedVersion,
       isLocalDev: pluginEntry.isLocalDev,
+      localDevPath: pluginEntry.localDevPath,
     }
   } catch {
     return {
@@ -97,6 +110,7 @@ export function getPluginInfo(): PluginInfo {
       isPinned: false,
       pinnedVersion: null,
       isLocalDev: false,
+      localDevPath: null,
     }
   }
 }

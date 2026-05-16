@@ -1,6 +1,10 @@
 /// <reference types="bun-types" />
 
-import { beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+import { spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { PLUGIN_NAME } from "../../../shared"
 import type { PluginInfo } from "./system-plugin"
 import type { OpenCodeBinaryInfo } from "./system-binary"
@@ -19,6 +23,7 @@ const mockGetPluginInfo = mock((): PluginInfo => ({
   pinnedVersion: null,
   configPath: null,
   isLocalDev: false,
+  localDevPath: null,
 }))
 const mockGetLoadedPluginVersion = mock(() => ({
   cacheDir: "/Users/test/Library/Caches/opencode with spaces",
@@ -43,8 +48,33 @@ function createSystemDeps() {
   }
 }
 
+function runGit(args: string[], cwd: string): string {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || "git command failed")
+  }
+  return result.stdout.trim()
+}
+
+function createGitPackage(root: string): string {
+  const packageRoot = join(root, "oh-my-openagent")
+  mkdirSync(packageRoot, { recursive: true })
+  writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "oh-my-opencode", version: "4.0.0" }))
+  runGit(["init"], packageRoot)
+  runGit(["add", "package.json"], packageRoot)
+  runGit(["-c", "user.name=OmO Test", "-c", "user.email=omo@example.com", "commit", "-m", "initial"], packageRoot)
+  return packageRoot
+}
+
 describe("system check", () => {
+  let temporaryDirectories: string[] = []
+
   beforeEach(() => {
+    temporaryDirectories = []
     mockFindOpenCodeBinary.mockReset()
     mockGetOpenCodeVersion.mockReset()
     mockCompareVersions.mockReset()
@@ -66,6 +96,7 @@ describe("system check", () => {
       pinnedVersion: null,
       configPath: null,
       isLocalDev: false,
+      localDevPath: null,
     })
     mockGetLoadedPluginVersion.mockReturnValue({
       cacheDir: "/Users/test/Library/Caches/opencode with spaces",
@@ -76,6 +107,12 @@ describe("system check", () => {
     })
     mockGetLatestPluginVersion.mockResolvedValue(null)
     mockGetSuggestedInstallTag.mockReturnValue("latest")
+  })
+
+  afterEach(() => {
+    for (const temporaryDirectory of temporaryDirectories) {
+      rmSync(temporaryDirectory, { recursive: true, force: true })
+    }
   })
 
   describe("#given cache directory contains spaces", () => {
@@ -125,6 +162,7 @@ describe("system check", () => {
         pinnedVersion: null,
         configPath: null,
         isLocalDev: false,
+        localDevPath: null,
       })
 
       //#when
@@ -147,6 +185,7 @@ describe("system check", () => {
         pinnedVersion: "3.0.0",
         configPath: null,
         isLocalDev: false,
+        localDevPath: null,
       })
 
       //#when
@@ -169,6 +208,7 @@ describe("system check", () => {
         pinnedVersion: null,
         configPath: null,
         isLocalDev: false,
+        localDevPath: null,
       })
 
       //#when
@@ -187,6 +227,7 @@ describe("system check", () => {
         pinnedVersion: null,
         configPath: null,
         isLocalDev: true,
+        localDevPath: null,
       })
 
       //#when
@@ -194,6 +235,31 @@ describe("system check", () => {
 
       //#then
       expect(result.issues.some((issue) => issue.title === "Using legacy package name")).toBe(false)
+    })
+  })
+
+  describe("#given local file protocol plugin points at a git checkout", () => {
+    it("uses the observable local version in system details", async () => {
+      //#given
+      const workdir = mkdtempSync(join(tmpdir(), "omo-doctor-system-"))
+      temporaryDirectories.push(workdir)
+      const packageRoot = createGitPackage(workdir)
+      const shortCommit = runGit(["rev-parse", "--short", "HEAD"], packageRoot)
+      mockGetPluginInfo.mockReturnValue({
+        registered: true,
+        entry: `file://${packageRoot}`,
+        isPinned: false,
+        pinnedVersion: null,
+        configPath: null,
+        isLocalDev: true,
+        localDevPath: packageRoot,
+      })
+
+      //#when
+      const result = await checkSystem(createSystemDeps())
+
+      //#then
+      expect(result.details).toContain(`Plugin expected: 4.0.0-ql-${shortCommit}`)
     })
   })
 })
