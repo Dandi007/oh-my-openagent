@@ -8,7 +8,7 @@ import {
   getPlanProgress,
   createBoulderState,
   clearBoulderState,
-  getActiveWorks,
+  getWorkForSessionStrict,
   resolveBoulderPlanPathForWork,
 } from "../../features/boulder-state"
 import { log } from "../../shared/logger"
@@ -137,10 +137,21 @@ export function createStartWorkHook(ctx: PluginInput) {
       // Immediately inject Atlas continuation so CLI --command mode
       // doesn't exit before Atlas runs its first orchestration prompt.
       // In interactive mode (chat.message), the session.idle event handles this.
-      const activeWorks = getActiveWorks(ctx.directory)
-      if (activeWorks.length === 0) return
+      const sessionWorkResult = getWorkForSessionStrict(ctx.directory, input.sessionID)
+      if (sessionWorkResult.error) {
+        log(`[${HOOK_NAME}] Failed to resolve CLI continuation work for current session: ${sessionWorkResult.error}`, {
+          sessionID: input.sessionID,
+        })
+      }
 
-      const work = activeWorks[0]
+      const work = sessionWorkResult.work
+      if (!work) {
+        log(`[${HOOK_NAME}] No current-session work for CLI immediate continuation`, {
+          sessionID: input.sessionID,
+        })
+        return
+      }
+
       const planPath = resolveBoulderPlanPathForWork(ctx.directory, work)
       const progress = getPlanProgress(planPath)
       if (progress.isComplete) return

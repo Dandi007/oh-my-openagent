@@ -1,0 +1,42 @@
+Task 8 PR evidence created at 2026-05-16 01:07:17 +0800
+
+PR create URL:
+https://github.com/Dandi007/oh-my-openagent/pull/2
+
+PR JSON verification:
+{"baseRefName":"personal-dev-boulder-multi-session","headRefName":"fix/boulder-start-work-session-isolation","url":"https://github.com/Dandi007/oh-my-openagent/pull/2"}
+
+Branch upstream verification:
+origin/fix/boulder-start-work-session-isolation
+
+Recent commits:
+38d98e77 test(start-work): add task 8 verification evidence
+1871be0e docs(start-work): document session-scoped resume
+70c8e35d fix(start-work): avoid active-work fallback in cli continuation
+a19a6576 fix(start-work): restrict no-arg resume to current session
+
+Final status including ignored artifacts:
+!! .opencode/.gitignore
+!! .opencode/node_modules/
+!! .opencode/package-lock.json
+!! .opencode/package.json
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-1-worktree.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-2-isolation.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-2-negative-repro-before-fix.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-3-explicit-plan.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-3-unit-red.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-4-bound-resume.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-4-unbound-safe.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-5-cli-bound-continuation.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-5-cli-unbound-noop.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-6-template-no-auto-resume.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-6-template-session-scoped.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-7-explicit-plan-b-after-fix.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-7-positive-rerun-after-fix.txt
+!! .sisyphus/evidence/boulder-start-work-session-isolation/task-8-pr.txt
+!! .sisyphus/ralph-loop.local.md
+!! dist/
+!! web/lib/docs-content.generated.ts
+
+Safety note:
+No force push was used. No temp OpenCode DB/config/data, user config, node_modules, dist, or secrets were staged for commit.
