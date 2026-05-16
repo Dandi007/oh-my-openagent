@@ -1,14 +1,34 @@
 import type { TeamModeConfig } from "../../config/schema/team-mode"
 import { findResolvedMemberSession } from "../../features/team-mode/member-session-resolution"
+import {
+  releaseDeliveryReservation,
+  reserveMessageForDelivery,
+} from "../../features/team-mode/team-mailbox/reservation"
 import { loadRuntimeState, transitionRuntimeState } from "../../features/team-mode/team-state-store/store"
+import { resolveSessionEventID } from "../../shared/event-session-id"
 import { log } from "../../shared/logger"
 
 type HookInput = { event: { type: string; properties?: unknown } }
 export type HookImpl = (input: HookInput) => Promise<void>
 
 function getErroredSessionID(properties: unknown): string | undefined {
-  const record = properties as { sessionID?: string } | undefined
-  return record?.sessionID
+  return resolveSessionEventID(properties)
+}
+
+async function requeuePendingLiveDeliveries(
+  teamRunId: string,
+  memberName: string,
+  messageIds: readonly string[],
+  config: TeamModeConfig,
+): Promise<void> {
+  for (const messageId of messageIds) {
+    const reservation = await reserveMessageForDelivery(teamRunId, memberName, messageId, config)
+    if (reservation === null) {
+      continue
+    }
+
+    await releaseDeliveryReservation(reservation)
+  }
 }
 
 export function createTeamMemberErrorHandler(config: TeamModeConfig): HookImpl {
@@ -25,11 +45,19 @@ export function createTeamMemberErrorHandler(config: TeamModeConfig): HookImpl {
       }
 
       const runtimeState = await loadRuntimeState(runtimeMember.teamRunId, config)
+      const memberEntry = runtimeState.members.find((member) => member.name === runtimeMember.memberName)
+      const pendingInjectedMessageIds = memberEntry?.pendingInjectedMessageIds ?? []
+      await requeuePendingLiveDeliveries(
+        runtimeState.teamRunId,
+        runtimeMember.memberName,
+        pendingInjectedMessageIds,
+        config,
+      )
       await transitionRuntimeState(runtimeState.teamRunId, (currentRuntimeState) => ({
         ...currentRuntimeState,
         members: currentRuntimeState.members.map((member) => (
           member.name === runtimeMember.memberName
-            ? { ...member, status: "errored" }
+            ? { ...member, status: "errored", pendingInjectedMessageIds: [] }
             : member
         )),
       }), config)

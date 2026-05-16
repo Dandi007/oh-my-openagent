@@ -5,6 +5,7 @@ import { createEventHandler } from "./event"
 import { _resetForTesting, setMainSession } from "../features/claude-code-session-state"
 import { createModelFallbackHook, clearPendingModelFallback } from "../hooks/model-fallback/hook"
 import * as connectedProvidersCache from "../shared/connected-providers-cache"
+import { unsafeTestValue } from "../../test-support/unsafe-test-value"
 
 let readConnectedProvidersCacheSpy: { mockRestore: () => void } | undefined
 let readProviderModelsCacheSpy: { mockRestore: () => void } | undefined
@@ -17,12 +18,24 @@ function setupConnectedProviderCacheMocks(): void {
 type PromptBody = {
   path: { id: string }
   body: {
-    parts: Array<{ type: "text"; text: string }>
+    parts: Array<{
+      type: "text"
+      text: string
+      synthetic?: boolean
+      metadata?: Record<string, unknown>
+    }>
     agent?: string
     model?: { providerID: string; modelID: string }
     variant?: string
+    noReply?: boolean
   }
   query: { directory: string }
+}
+
+function expectSyntheticContinuation(body: PromptBody["body"]): void {
+  expect(body.noReply).toBeUndefined()
+  expect(body.parts[0]?.synthetic).toBe(true)
+  expect(body.parts[0]?.metadata?.compaction_continue).toBe(true)
 }
 
 describe("createEventHandler - model-fallback auto-continuation pins agent/model/variant", () => {
@@ -50,16 +63,16 @@ describe("createEventHandler - model-fallback auto-continuation pins agent/model
     }
 
     const handler = createEventHandler({
-      ctx: {
+      ctx: unsafeTestValue({
         directory: "/tmp",
         client: { session: sessionClient },
-      } as any,
-      pluginConfig: (args?.pluginConfig ?? {}) as any,
+      }),
+      pluginConfig: unsafeTestValue((args?.pluginConfig ?? {})),
       firstMessageVariantGate: {
         markSessionCreated: () => {},
         clear: () => {},
       },
-      managers: {
+      managers: unsafeTestValue({
         tmuxSessionManager: {
           onSessionCreated: async () => {},
           onSessionDeleted: async () => {},
@@ -67,8 +80,8 @@ describe("createEventHandler - model-fallback auto-continuation pins agent/model
         skillMcpManager: {
           disconnectSession: async () => {},
         },
-      } as any,
-      hooks: args?.hooks ?? ({} as any),
+      }),
+      hooks: args?.hooks ?? (unsafeTestValue({})),
     })
 
     return { handler, promptAsyncBodies, promptBodies }
@@ -126,6 +139,7 @@ describe("createEventHandler - model-fallback auto-continuation pins agent/model
       providerID: "anthropic",
       modelID: "claude-opus-4-7",
     })
+    expectSyntheticContinuation(body)
   })
 
   test("pins agent/model on promptAsync body when continuing after session.error fallback", async () => {
@@ -166,6 +180,7 @@ describe("createEventHandler - model-fallback auto-continuation pins agent/model
       providerID: "anthropic",
       modelID: "claude-opus-4-7",
     })
+    expectSyntheticContinuation(body)
   })
 
   test("pins agent/model on fallback prompt() body when promptAsync is not available (session.status)", async () => {
@@ -222,6 +237,7 @@ describe("createEventHandler - model-fallback auto-continuation pins agent/model
       providerID: "anthropic",
       modelID: "claude-opus-4-7",
     })
+    expectSyntheticContinuation(body)
   })
 
   test("pins variant from agent config when present", async () => {
@@ -267,5 +283,6 @@ describe("createEventHandler - model-fallback auto-continuation pins agent/model
     expect(promptAsyncBodies.length).toBe(1)
     const body = promptAsyncBodies[0]!.body
     expect(body.variant).toBe("thinking")
+    expectSyntheticContinuation(body)
   })
 })

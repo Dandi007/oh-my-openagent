@@ -16,10 +16,11 @@ import {
 } from "../../features/claude-code-session-state"
 import { getLastAgentFromSession } from "./session-last-agent"
 import { isSessionInBoulderLineage } from "./boulder-session-lineage"
-import { createInternalAgentTextPart } from "../../shared"
+import { createInternalAgentContinuationTextPart } from "../../shared"
 import { getAgentConfigKey } from "../../shared/agent-display-names"
 import { log } from "../../shared/logger"
-import { settleAfterSessionIdle } from "../shared/session-idle-settle"
+import { shouldPromptAfterSessionIdle } from "../shared/session-idle-settle"
+import { promptAsyncAfterSessionIdle } from "../shared/prompt-async-gate"
 import { injectBoulderContinuation } from "./boulder-continuation-injector"
 import { HOOK_NAME } from "./hook-name"
 import { resolveActiveBoulderSession } from "./resolve-active-boulder-session"
@@ -52,6 +53,7 @@ async function injectContinuation(input: {
   progress: { total: number; completed: number }
   agent?: string
   worktreePath?: string
+  idleSettleMs?: number
 }): Promise<void> {
   const remaining = input.progress.total - input.progress.completed
   if (input.sessionState.isInjectingContinuation) {
@@ -105,6 +107,7 @@ async function injectContinuation(input: {
       preferredTaskTitle: preferredTaskSession?.task_title,
       backgroundManager: input.options?.backgroundManager,
       sessionState: input.sessionState,
+      idleSettleMs: input.idleSettleMs,
     })
 
     if (result === "injected") {
@@ -273,14 +276,32 @@ export async function handleAtlasSessionIdle(input: {
       work.agent ?? (isAgentRegistered("atlas") ? "atlas" : undefined),
     )
     if (atlasAgent && isAgentRegistered(atlasAgent)) {
-      await ctx.client.session.promptAsync({
-        path: { id: sessionID },
-        body: {
-          agent: atlasAgent,
-          parts: [createInternalAgentTextPart(prompt)],
+      if (!(await shouldPromptAfterSessionIdle(ctx.client, sessionID, options?.idleSettleMs))) {
+        log(`[${HOOK_NAME}] Boulder completion nudge skipped because session is active`, { sessionID })
+        return
+      }
+
+      const promptResult = await promptAsyncAfterSessionIdle({
+        client: ctx.client,
+        sessionID,
+        source: HOOK_NAME,
+        settleMs: options?.idleSettleMs,
+        input: {
+          path: { id: sessionID },
+          body: {
+            agent: atlasAgent,
+            parts: [createInternalAgentContinuationTextPart(prompt)],
+          },
+          query: { directory: ctx.directory },
         },
-        query: { directory: ctx.directory },
       })
+      if (promptResult.status !== "dispatched") {
+        log(`[${HOOK_NAME}] Boulder completion nudge skipped by promptAsync gate`, {
+          sessionID,
+          status: promptResult.status,
+        })
+        return
+      }
       sessionState.boulderCompletionNudgedAt = {
         ...(sessionState.boulderCompletionNudgedAt ?? {}),
         [work.work_id]: Date.now(),
@@ -369,7 +390,10 @@ export async function handleAtlasSessionIdle(input: {
     return
   }
 
-  await settleAfterSessionIdle(options?.idleSettleMs)
+  if (!(await shouldPromptAfterSessionIdle(ctx.client, sessionID, options?.idleSettleMs))) {
+    log(`[${HOOK_NAME}] Skipped: session became active during idle settle`, { sessionID })
+    return
+  }
 
   await injectContinuation({
     ctx,
@@ -380,6 +404,7 @@ export async function handleAtlasSessionIdle(input: {
     progress,
     agent: work.agent,
     worktreePath: work.worktree_path,
+    idleSettleMs: options?.idleSettleMs ?? 0,
   })
 }
 

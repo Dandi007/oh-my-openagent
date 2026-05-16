@@ -130,9 +130,13 @@ export function createToolExecuteAfterHandler(input: {
   autoCommit: boolean
   getState: (sessionID: string) => SessionState
   isCallerOrchestrator?: (sessionID: string | undefined) => Promise<boolean>
+  collectGitDiffStats?: typeof collectGitDiffStats
+  formatFileChanges?: typeof formatFileChanges
 }): (toolInput: ToolExecuteAfterInput, toolOutput: ToolExecuteAfterOutput | undefined) => Promise<void> {
   const { ctx, pendingFilePaths, pendingTaskRefs, pendingPlanSnapshots, autoCommit, getState } = input
   const resolveIsCallerOrchestrator = input.isCallerOrchestrator ?? ((sessionID) => isCallerOrchestrator(sessionID, ctx.client))
+  const collectGitDiffStatsImpl = input.collectGitDiffStats ?? collectGitDiffStats
+  const formatFileChangesImpl = input.formatFileChanges ?? formatFileChanges
   return async (toolInput, toolOutput): Promise<void> => {
     // Guard against undefined output (e.g., from /review command - see issue #1035)
     if (!toolOutput) {
@@ -229,8 +233,8 @@ export function createToolExecuteAfterHandler(input: {
       if (sessionWork) {
         const worktreePath = sessionWork.worktree_path?.trim()
         const verificationDirectory = worktreePath ? worktreePath : ctx.directory
-        const gitStats = collectGitDiffStats(verificationDirectory)
-        const fileChanges = formatFileChanges(gitStats)
+        const gitStats = collectGitDiffStatsImpl(verificationDirectory)
+        const fileChanges = formatFileChangesImpl(gitStats)
 
         const planPath = resolveBoulderPlanPathForWork(ctx.directory, sessionWork)
         const progress = getPlanProgress(planPath)

@@ -2,6 +2,7 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import type { TmuxConfig } from "../../config/schema"
 import type { TrackedSession, CapacityConfig, WindowState } from "./types"
 import * as sharedModule from "../../shared"
+import { resolveSessionEventID } from "../../shared/event-session-id"
 import {
   isInsideTmux as defaultIsInsideTmux,
   getCurrentPaneId as defaultGetCurrentPaneId,
@@ -11,6 +12,7 @@ import {
   killTmuxSessionIfExists,
   getIsolatedSessionName,
   sweepStaleOmoAgentSessions,
+  activateTmuxPane,
 } from "../../shared/tmux"
 import { queryWindowState as defaultQueryWindowState } from "./pane-state-querier"
 import { decideSpawnActions, decideCloseAction, type SessionMapping } from "./decision-engine"
@@ -54,6 +56,8 @@ export interface TmuxUtilDeps {
   getCurrentPaneId: () => string | undefined
   queryWindowState: (paneId: string) => Promise<WindowState | null>
   waitForSessionReady: (params: { client: OpencodeClient; sessionId: string }) => Promise<boolean>
+  executeActions: typeof executeActions
+  executeAction: typeof executeAction
   log: typeof sharedModule.log
 }
 
@@ -62,6 +66,8 @@ const defaultTmuxDeps: TmuxUtilDeps = {
   getCurrentPaneId: defaultGetCurrentPaneId,
   queryWindowState: defaultQueryWindowState,
   waitForSessionReady,
+  executeActions,
+  executeAction,
   log: sharedModule.log,
 }
 
@@ -71,6 +77,13 @@ const FAILED_READINESS_SWEEP_INTERVAL_MS = 60 * 1000
 const MAX_DEFERRED_QUEUE_SIZE = 20
 const MAX_CLOSE_RETRY_COUNT = 3
 const MAX_ISOLATED_CONTAINER_NULL_STATE_COUNT = 2
+let nextIsolatedSessionManagerId = 1
+
+function createIsolatedSessionManagerId(): string {
+  const managerId = String(nextIsolatedSessionManagerId)
+  nextIsolatedSessionManagerId += 1
+  return managerId
+}
 
 export class TmuxSessionManager {
   private client: OpencodeClient
@@ -96,6 +109,7 @@ export class TmuxSessionManager {
   private isolatedContainerNullStateCount = 0
   private staleSweepCompleted = false
   private staleSweepInProgress = false
+  private isolatedSessionManagerId = createIsolatedSessionManagerId()
   constructor(ctx: PluginInput, tmuxConfig: TmuxConfig, deps: Partial<TmuxUtilDeps> = {}) {
     this.client = ctx.client
     this.tmuxConfig = tmuxConfig
@@ -128,7 +142,10 @@ export class TmuxSessionManager {
       this.client,
       this.sessions,
       this.closeSessionFromPolling.bind(this),
-      this.retryPendingCloses.bind(this)
+      this.retryPendingCloses.bind(this),
+      this.queryWindowStateSafely.bind(this),
+      this.activateTrackedSessionPane.bind(this),
+      this.canAutoActivatePane.bind(this),
     )
     this.deps.log("[tmux-session-manager] initialized", {
       configEnabled: this.tmuxConfig.enabled,
@@ -188,7 +205,16 @@ export class TmuxSessionManager {
     this.deps.log("[tmux-session-manager] creating isolated tmux container", { isolation, sessionId, title })
 
     const result = isolation === "session"
-      ? await spawnTmuxSession(sessionId, title, this.tmuxConfig, this.serverUrl, this.projectDirectory, this.sourcePaneId)
+      ? await spawnTmuxSession(
+        sessionId,
+        title,
+        this.tmuxConfig,
+        this.serverUrl,
+        this.projectDirectory,
+        this.sourcePaneId,
+        undefined,
+        this.isolatedSessionManagerId,
+      )
       : await spawnTmuxWindow(sessionId, title, this.tmuxConfig, this.serverUrl, this.projectDirectory)
 
     if (result.success && result.paneId) {
@@ -280,7 +306,7 @@ export class TmuxSessionManager {
     }
 
     try {
-      const result = await executeAction(
+      const result = await this.deps.executeAction(
         { type: "close", paneId: isolatedContainerPaneId, sessionId: tracked.sessionId },
         {
           config: this.tmuxConfig,
@@ -332,6 +358,10 @@ export class TmuxSessionManager {
     }
   }
 
+  private async activateTrackedSessionPane(tracked: TrackedSession): Promise<boolean> {
+    return activateTmuxPane(tracked.paneId, tracked.sessionId, this.serverUrl, this.projectDirectory)
+  }
+
   private windowStateContainsPane(state: WindowState, paneId: string): boolean {
     return state.mainPane?.paneId === paneId
       || state.agentPanes.some((pane) => pane.paneId === paneId)
@@ -373,6 +403,11 @@ export class TmuxSessionManager {
     return true
   }
 
+  private canAutoActivatePane(state: WindowState): boolean {
+    if (!this.isIsolated()) return true
+    return state.windowActive === true && state.sessionAttached === true
+  }
+
   private async closeTrackedSessionPane(args: {
     tracked: TrackedSession
     state: WindowState
@@ -380,7 +415,7 @@ export class TmuxSessionManager {
     const { tracked, state } = args
 
     try {
-      const result = await executeAction(
+      const result = await this.deps.executeAction(
         { type: "close", paneId: tracked.paneId, sessionId: tracked.sessionId },
         {
           config: this.tmuxConfig,
@@ -811,7 +846,7 @@ export class TmuxSessionManager {
       return
     }
 
-    const result = await executeActions(
+    const result = await this.deps.executeActions(
       decision.actions,
       {
         config: this.tmuxConfig,
@@ -871,7 +906,7 @@ export class TmuxSessionManager {
     this.enqueueDeferredSession(sessionId, title)
 
     if (result.spawnedPaneId) {
-      await executeAction(
+      await this.deps.executeAction(
         { type: "close", paneId: result.spawnedPaneId, sessionId },
         {
           config: this.tmuxConfig,
@@ -1044,7 +1079,7 @@ export class TmuxSessionManager {
         return
       }
 
-      const result = await executeActions(decision.actions, {
+      const result = await this.deps.executeActions(decision.actions, {
         config: this.tmuxConfig,
         directory: this.projectDirectory,
         serverUrl: this.serverUrl,
@@ -1098,9 +1133,9 @@ export class TmuxSessionManager {
     if (event.type !== "session.created") return
 
     const info = event.properties?.info
-    if (!info?.id || !info?.parentID) return
+    const sessionId = resolveSessionEventID(event.properties)
+    if (!sessionId || !info?.parentID) return
 
-    const sessionId = info.id
     const title = info.title ?? "Subagent"
 
     if (!this.sourcePaneId) {
@@ -1184,7 +1219,7 @@ export class TmuxSessionManager {
       closeAction.type === "close" && closeAction.paneId === tracked.paneId
 
     try {
-      const result = await executeAction(closeAction, {
+      const result = await this.deps.executeAction(closeAction, {
         config: this.tmuxConfig,
         directory: this.projectDirectory,
         serverUrl: this.serverUrl,
@@ -1304,7 +1339,7 @@ export class TmuxSessionManager {
     this.isolatedWindowPaneId = undefined
 
     if (this.tmuxConfig.isolation === "session") {
-      const isolatedSessionName = getIsolatedSessionName()
+      const isolatedSessionName = getIsolatedSessionName(process.pid, this.isolatedSessionManagerId)
       try {
         const killed = await killTmuxSessionIfExists(isolatedSessionName)
         this.deps.log("[tmux-session-manager] isolated session teardown", {

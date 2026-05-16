@@ -12,6 +12,7 @@ import {
 } from "./constants"
 
 type TimerCallback = (...args: any[]) => void
+type FakeTimerID = number & ReturnType<typeof setTimeout> & ReturnType<typeof setInterval>
 
 interface FakeTimers {
   advanceBy: (ms: number, advanceClock?: boolean) => Promise<void>
@@ -57,7 +58,7 @@ function createFakeTimers(): FakeTimers {
       callback,
       args,
     })
-    return id
+    return id as FakeTimerID
   }
 
   const clear = (id: number | undefined) => {
@@ -74,7 +75,7 @@ function createFakeTimers(): FakeTimers {
     if (normalized >= REAL_MAX_DELAY_MS) {
       return original.setTimeout(callback, delay, ...args)
     }
-    return schedule(callback, normalized, null, args) as unknown as ReturnType<typeof setTimeout>
+    return schedule(callback, normalized, null, args)
   }) as typeof setTimeout
 
   globalThis.setInterval = ((callback: TimerCallback, delay?: number, ...args: any[]) => {
@@ -85,7 +86,7 @@ function createFakeTimers(): FakeTimers {
     if (interval >= REAL_MAX_DELAY_MS) {
       return original.setInterval(callback, delay, ...args)
     }
-    return schedule(callback, interval, interval, args) as unknown as ReturnType<typeof setInterval>
+    return schedule(callback, interval, interval, args)
   }) as typeof setInterval
 
   globalThis.clearTimeout = ((id?: Parameters<typeof clearTimeout>[0]) => {
@@ -184,6 +185,8 @@ describe("todo-continuation-enforcer", () => {
     }
   }
 
+  type MockPluginInput = Parameters<typeof createTodoContinuationEnforcer>[0]
+
   let mockMessages: MockMessage[] = []
 
   function createMockPluginInput() {
@@ -225,7 +228,7 @@ describe("todo-continuation-enforcer", () => {
         },
       },
       directory: "/tmp/test",
-    } as any
+    } as MockPluginInput
   }
 
   function createMockBackgroundManager(runningTasks: boolean = false): BackgroundManager {
@@ -233,7 +236,7 @@ describe("todo-continuation-enforcer", () => {
       getTasksByParentSession: () => runningTasks
         ? [{ status: "running" }]
         : [],
-    } as any
+    } as BackgroundManager
   }
 
   beforeEach(() => {
@@ -299,6 +302,26 @@ describe("todo-continuation-enforcer", () => {
     // then - after countdown, continuation injected
     await wait(2500)
     expect(promptCalls.length).toBe(1)
+    expect(promptCalls[0].text).toContain("TODO CONTINUATION")
+  }, { timeout: 15000 })
+
+  test("should inject continuation when idle event carries session id in info", async () => {
+    fakeTimers.restore()
+    // given - OpenCode session events can nest the session id under info
+    const sessionID = "main-info-idle"
+    setMainSession(sessionID)
+
+    const hook = createTodoContinuationEnforcer(createMockPluginInput(), {})
+
+    // when - session goes idle with the nested event shape
+    await hook.handler({
+      event: { type: "session.idle", properties: { info: { id: sessionID } } },
+    })
+
+    // then - continuation is still injected for that session
+    await wait(2500)
+    expect(promptCalls).toHaveLength(1)
+    expect(promptCalls[0].sessionID).toBe(sessionID)
     expect(promptCalls[0].text).toContain("TODO CONTINUATION")
   }, { timeout: 15000 })
 
@@ -509,6 +532,42 @@ describe("todo-continuation-enforcer", () => {
         type: "message.part.updated",
         properties: {
           sessionID,
+          part: {
+            id: "part-1",
+            messageID: "msg-1",
+            sessionID,
+            type: "text",
+            text: "working",
+          },
+          time: Date.now(),
+        },
+      },
+    })
+
+    await fakeTimers.advanceBy(3000)
+
+    // then - no continuation injected (cancelled)
+    expect(promptCalls).toHaveLength(0)
+  })
+
+  test("should cancel countdown on assistant activity when message.part.updated only has part session id", async () => {
+    // given - session starting countdown
+    const sessionID = "main-assistant-part-only"
+    setMainSession(sessionID)
+
+    const hook = createTodoContinuationEnforcer(createMockPluginInput(), {})
+
+    // when - session goes idle
+    await hook.handler({
+      event: { type: "session.idle", properties: { sessionID } },
+    })
+
+    // when - legacy part-only sync payload reports assistant output
+    await fakeTimers.advanceBy(500)
+    await hook.handler({
+      event: {
+        type: "message.part.updated",
+        properties: {
           part: {
             id: "part-1",
             messageID: "msg-1",
@@ -1131,16 +1190,9 @@ describe("todo-continuation-enforcer", () => {
     // then - continuation injected (non-abort errors don't block)
     expect(promptCalls.length).toBe(1)
   }, { timeout: 15000 })
-
-
-
-
-
-  // ============================================================
   // API-BASED ABORT DETECTION TESTS
   // These tests verify that abort is detected by checking
   // the last assistant message's error field via session.messages API
-  // ============================================================
 
   test("should skip injection when last assistant message has MessageAbortedError", async () => {
     // given - session where last assistant message was aborted
@@ -1599,7 +1651,7 @@ describe("todo-continuation-enforcer", () => {
          tui: { showToast: async () => ({}) },
        },
        directory: "/tmp/test",
-     } as any
+     } as MockPluginInput
 
      const hook = createTodoContinuationEnforcer(mockInput, {
        backgroundManager: createMockBackgroundManager(false),
@@ -1614,11 +1666,9 @@ describe("todo-continuation-enforcer", () => {
      expect(promptCalls[0].model).toEqual({ providerID: "openai", modelID: "gpt-5.4" })
   })
 
-  // ============================================================
   // COMPACTION AGENT FILTERING TESTS
   // These tests verify that compaction agent messages are filtered
   // when resolving agent info, preventing infinite continuation loops
-  // ============================================================
 
   test("should skip injection while the latest message is from the compaction agent", async () => {
     // given - session where the latest activity is still the compaction assistant turn
@@ -1660,7 +1710,7 @@ describe("todo-continuation-enforcer", () => {
          tui: { showToast: async () => ({}) },
        },
        directory: "/tmp/test",
-     } as any
+     } as MockPluginInput
 
      const hook = createTodoContinuationEnforcer(mockInput, {
        backgroundManager: createMockBackgroundManager(false),
@@ -1712,7 +1762,7 @@ describe("todo-continuation-enforcer", () => {
          tui: { showToast: async () => ({}) },
        },
        directory: "/tmp/test",
-     } as any
+     } as MockPluginInput
 
      const hook = createTodoContinuationEnforcer(mockInput, {})
 
@@ -1769,7 +1819,7 @@ describe("todo-continuation-enforcer", () => {
         tui: { showToast: async () => ({}) },
       },
       directory: "/tmp/test",
-    } as any
+    } as MockPluginInput
 
     const hook = createTodoContinuationEnforcer(mockInput, {
       backgroundManager: createMockBackgroundManager(false),
@@ -1823,7 +1873,7 @@ describe("todo-continuation-enforcer", () => {
          tui: { showToast: async () => ({}) },
        },
        directory: "/tmp/test",
-     } as any
+     } as MockPluginInput
 
      const hook = createTodoContinuationEnforcer(mockInput, {})
 
@@ -1878,7 +1928,7 @@ describe("todo-continuation-enforcer", () => {
          tui: { showToast: async () => ({}) },
        },
        directory: "/tmp/test",
-     } as any
+     } as MockPluginInput
 
      const hook = createTodoContinuationEnforcer(mockInput, {
        skipAgents: [],
@@ -2043,11 +2093,9 @@ describe("todo-continuation-enforcer", () => {
     expect(promptCalls).toHaveLength(1)
   }, { timeout: 20000 })
 
-  // ============================================================
   // TOKEN-LIMIT ERROR DETECTION TESTS (#2462)
   // These tests verify that the enforcer does NOT retry continuation
   // when the model returns a token-limit / context-length error.
-  // ============================================================
 
   test("should stop continuation when session.error carries a ContextLengthError", async () => {
     // given - session with incomplete todos
@@ -2122,7 +2170,7 @@ describe("todo-continuation-enforcer", () => {
     const mockInput = createMockPluginInput()
     mockInput.client.session.promptAsync = async () => {
       const error = new Error("prompt is too long: 150000 tokens > 100000 maximum")
-      ;(error as any).name = "ContextLengthError"
+      error.name = "ContextLengthError"
       throw error
     }
 

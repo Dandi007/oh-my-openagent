@@ -1,4 +1,4 @@
-import type { RalphLoopOptions, RalphLoopState } from "./types"
+import type { IterationCommitExpectation, RalphLoopOptions, RalphLoopState } from "./types"
 import {
 	DEFAULT_COMPLETION_PROMISE,
 	DEFAULT_MAX_ITERATIONS,
@@ -86,8 +86,8 @@ export function createLoopStateController(options: {
 			return clearState(directory, stateDir)
 		},
 
-		incrementIteration(): RalphLoopState | null {
-			return incrementIteration(directory, stateDir)
+		incrementIteration(expected?: IterationCommitExpectation): RalphLoopState | null {
+			return incrementIteration(directory, stateDir, expected)
 		},
 
 		setSessionID(sessionID: string): RalphLoopState | null {
@@ -104,9 +104,21 @@ export function createLoopStateController(options: {
 			return state
 		},
 
-		setMessageCountAtStart(sessionID: string, messageCountAtStart: number): RalphLoopState | null {
+		setMessageCountAtStart(
+			sessionID: string,
+			messageCountAtStart: number,
+			expectedStartedAt?: string,
+		): RalphLoopState | null {
 			const state = readState(directory, stateDir)
 			if (!state || state.session_id !== sessionID) {
+				return null
+			}
+			if (
+				state.iteration !== 1
+				|| state.verification_pending
+				|| state.message_count_at_start !== undefined
+				|| (expectedStartedAt !== undefined && state.started_at !== expectedStartedAt)
+			) {
 				return null
 			}
 

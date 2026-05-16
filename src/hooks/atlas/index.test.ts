@@ -11,6 +11,7 @@ import {
 } from "../../features/boulder-state"
 import type { BoulderState, BoulderWorkState } from "../../features/boulder-state"
 import { _resetForTesting, registerAgentName, subagentSessions, updateSessionAgent } from "../../features/claude-code-session-state"
+import { DEFAULT_PROMPT_DISPATCH_TIMEOUT_MS } from "../../shared/prompt-async-gate"
 import type { AtlasHookOptions, PendingTaskRef } from "./types"
 import { createAtlasHook } from "./index"
 import { createToolExecuteAfterHandler } from "./tool-execute-after"
@@ -1263,6 +1264,38 @@ session_id: ses_untrusted_999
       expect(callArgs.body.parts[0].text).toContain("2 remaining")
     })
 
+    test("should inject continuation when idle event carries session id in info", async () => {
+      // given - boulder state with incomplete plan and nested session event shape
+      const planPath = join(TEST_DIR, "test-plan-info-idle.md")
+      writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [x] Task 2\n- [ ] Task 3")
+
+      const state: BoulderState = {
+        active_plan: planPath,
+        started_at: "2026-01-02T10:00:00Z",
+        session_ids: [MAIN_SESSION_ID],
+        plan_name: "test-plan-info-idle",
+      }
+      writeBoulderState(TEST_DIR, state)
+
+      const mockInput = createMockPluginInput()
+      const hook = createTestAtlasHook(mockInput)
+
+      // when
+      await hook.handler({
+        event: {
+          type: "session.idle",
+          properties: { info: { id: MAIN_SESSION_ID } },
+        },
+      })
+
+      // then - should call prompt with continuation
+      expect(mockInput._promptMock).toHaveBeenCalled()
+      const callArgs = mockInput._promptMock.mock.calls[0][0]
+      expect(callArgs.path.id).toBe(MAIN_SESSION_ID)
+      expect(callArgs.body.parts[0].text).toContain("incomplete tasks")
+      expect(callArgs.body.parts[0].text).toContain("2 remaining")
+    })
+
     test("should settle idle before injecting boulder continuation", async () => {
       // given
       const planPath = join(TEST_DIR, "test-plan.md")
@@ -1545,7 +1578,7 @@ session_id: ses_untrusted_999
 
         // then - stale idle is consumed, not converted into another scheduled continuation
         expect(mockInput._promptMock).toHaveBeenCalledTimes(1)
-        expect(scheduledDelays).toHaveLength(0)
+        expect(scheduledDelays.filter((delay) => delay >= 5_000 && delay !== DEFAULT_PROMPT_DISPATCH_TIMEOUT_MS)).toHaveLength(0)
       } finally {
         globalThis.setTimeout = originalSetTimeout
       }
@@ -1856,6 +1889,39 @@ session_id: ses_untrusted_999
       const callArgs = mockInput._promptMock.mock.calls[0][0]
       expect(callArgs.body.agent).toBe("Atlas - Plan Executor")
       expect(callArgs.body.agent).not.toBe("atlas")
+    })
+
+    test("#given boulder agent registered with ZWSP sort prefix #when continuation injects #then promptAsync receives display name without ZWSP", async () => {
+      // given - OpenCode TUI registers agent names with leading ZWSP for sort ordering
+      const planPath = join(TEST_DIR, "test-plan.md")
+      writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
+
+      const state: BoulderState = {
+        active_plan: planPath,
+        started_at: "2026-01-02T10:00:00Z",
+        session_ids: [MAIN_SESSION_ID],
+        plan_name: "test-plan",
+        agent: "\u200B\u200BAtlas - Plan Executor",
+      }
+      writeBoulderState(TEST_DIR, state)
+      registerAgentName("\u200B\u200BAtlas - Plan Executor")
+
+      const mockInput = createMockPluginInput()
+      const hook = createTestAtlasHook(mockInput)
+
+      // when
+      await hook.handler({
+        event: {
+          type: "session.idle",
+          properties: { sessionID: MAIN_SESSION_ID },
+        },
+      })
+
+      // then
+      expect(mockInput._promptMock).toHaveBeenCalled()
+      const callArgs = mockInput._promptMock.mock.calls[0][0]
+      expect(callArgs.body.agent).toBe("Atlas - Plan Executor")
+      expect(callArgs.body.agent).not.toContain("\u200B")
     })
 
     test("should debounce rapid continuation injections (prevent infinite loop)", async () => {
@@ -2207,7 +2273,7 @@ session_id: ses_untrusted_999
 
         globalThis.setTimeout = ((callback: Parameters<typeof setTimeout>[0], delay?: number, ...args: unknown[]) => {
           const normalized = typeof delay === "number" ? delay : 0
-          if (normalized >= 5000) {
+          if (normalized >= 5000 && normalized !== DEFAULT_PROMPT_DISPATCH_TIMEOUT_MS) {
             const timerID = originalSetTimeout(() => undefined, 0)
             const capturedCallback = typeof callback === "function"
               ? () => callback(...args)
@@ -2221,8 +2287,9 @@ session_id: ses_untrusted_999
         }) as typeof setTimeout
 
         globalThis.clearTimeout = ((id?: ReturnType<typeof setTimeout>) => {
-          if (id && capturedTimers.has(id)) {
-            capturedTimers.get(id)!.cleared = true
+          const timerEntry = id ? capturedTimers.get(id) : undefined
+          if (timerEntry) {
+            timerEntry.cleared = true
             capturedTimers.delete(id)
             return
           }

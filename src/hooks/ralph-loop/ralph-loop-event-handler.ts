@@ -1,6 +1,9 @@
 import type { PluginInput } from "@opencode-ai/plugin"
 import { log } from "../../shared/logger"
-import type { RalphLoopOptions, RalphLoopState } from "./types"
+import { resolveMessageEventSessionID, resolveSessionEventID } from "../../shared/event-session-id"
+import { isSessionActive } from "../shared/session-idle-settle"
+import { releasePromptAsyncReservation } from "../shared/prompt-async-gate"
+import type { IterationCommitExpectation, RalphLoopOptions, RalphLoopState } from "./types"
 import { HOOK_NAME } from "./constants"
 import { handleDetectedCompletion } from "./completion-handler"
 import {
@@ -11,10 +14,12 @@ import { continueIteration } from "./iteration-continuation"
 import { handlePendingVerification } from "./pending-verification-handler"
 import { handleDeletedLoopSession, handleErroredLoopSession } from "./session-event-handler"
 
+const RAPID_IDLE_DEDUP_MS = 500
+
 type LoopStateController = {
 	getState: () => RalphLoopState | null
 	clear: () => boolean
-	incrementIteration: () => RalphLoopState | null
+	incrementIteration: (expected?: IterationCommitExpectation) => RalphLoopState | null
 	setSessionID: (sessionID: string) => RalphLoopState | null
 	markVerificationPending: (sessionID: string) => RalphLoopState | null
 	setVerificationSessionID: (sessionID: string, verificationSessionID: string) => RalphLoopState | null
@@ -36,12 +41,6 @@ function hasRunningBackgroundTasks(
 		: false
 }
 
-function getInfoSessionID(props: Record<string, unknown> | undefined): string | undefined {
-	const info = props?.info as Record<string, unknown> | undefined
-	const sessionID = info?.sessionID
-	return typeof sessionID === "string" ? sessionID : undefined
-}
-
 function getRuntimeRetryActivitySessionID(
 	eventType: string,
 	props: Record<string, unknown> | undefined,
@@ -49,23 +48,26 @@ function getRuntimeRetryActivitySessionID(
 	if (eventType === "message.updated") {
 		const info = props?.info as Record<string, unknown> | undefined
 		const role = info?.role
-		return role === "assistant" ? getInfoSessionID(props) : undefined
+		return role === "assistant" ? resolveMessageEventSessionID(props) : undefined
 	}
 
 	if (eventType === "message.part.updated") {
-		if (typeof props?.sessionID === "string") return props.sessionID
-		return getInfoSessionID(props)
+		return resolveMessageEventSessionID(props)
 	}
 
 	if (eventType === "message.part.delta") {
-		return typeof props?.sessionID === "string" ? props.sessionID : undefined
+		return resolveMessageEventSessionID(props)
 	}
 
 	if (eventType === "tool.execute.before" || eventType === "tool.execute.after") {
-		return typeof props?.sessionID === "string" ? props.sessionID : undefined
+		return resolveMessageEventSessionID(props)
 	}
 
 	return undefined
+}
+
+function isSyntheticIdle(props: Record<string, unknown> | undefined): boolean {
+	return props?.synthetic === true
 }
 
 function isAbortError(error: unknown): boolean {
@@ -189,17 +191,23 @@ export function createRalphLoopEventHandler(
 ) {
 	const inFlightSessions = new Set<string>()
 	const runtimeErrorRetriedSessions = new Map<string, number>()
+	const recentHandledSyntheticIdleAt = new Map<string, number>()
 
 	return async ({ event }: { event: { type: string; properties?: unknown } }): Promise<void> => {
 		const props = event.properties as Record<string, unknown> | undefined
 		const runtimeRetryActivitySessionID = getRuntimeRetryActivitySessionID(event.type, props)
 		if (runtimeRetryActivitySessionID) {
+			releasePromptAsyncReservation(runtimeRetryActivitySessionID, "ralph-loop:activity", {
+				reservedBy: HOOK_NAME,
+			})
 			runtimeErrorRetriedSessions.delete(runtimeRetryActivitySessionID)
+			recentHandledSyntheticIdleAt.delete(runtimeRetryActivitySessionID)
 		}
 
 		if (event.type === "session.idle") {
-			const sessionID = props?.sessionID as string | undefined
+			const sessionID = resolveSessionEventID(props)
 			if (!sessionID) return
+			const syntheticIdle = isSyntheticIdle(props)
 
 			if (inFlightSessions.has(sessionID)) {
 				log(`[${HOOK_NAME}] Skipped: handler in flight`, { sessionID })
@@ -245,6 +253,17 @@ export function createRalphLoopEventHandler(
 						}
 					}
 					return
+				}
+
+				const lastHandledSyntheticIdleAt = recentHandledSyntheticIdleAt.get(sessionID)
+				const now = Date.now()
+				if (!syntheticIdle && lastHandledSyntheticIdleAt !== undefined && now - lastHandledSyntheticIdleAt < RAPID_IDLE_DEDUP_MS) {
+					recentHandledSyntheticIdleAt.delete(sessionID)
+					log(`[${HOOK_NAME}] Skipped: duplicate real idle after synthetic idle`, { sessionID })
+					return
+				}
+				if (syntheticIdle) {
+					recentHandledSyntheticIdleAt.set(sessionID, now)
 				}
 
 				if (await handleCompletionIfDetected(ctx, options, {
@@ -313,6 +332,10 @@ export function createRalphLoopEventHandler(
 					})
 					return
 				}
+				if (await isSessionActive(ctx.client, sessionID)) {
+					log(`[${HOOK_NAME}] Skipped: session became active during settle window`, { sessionID })
+					return
+				}
 				if (stateAfterSettle.verification_pending) {
 					log(`[${HOOK_NAME}] Skipped: state entered verification_pending during settle window`, { sessionID })
 					return
@@ -339,6 +362,7 @@ export function createRalphLoopEventHandler(
 					previousSessionID: sessionID,
 					directory: options.directory,
 					apiTimeoutMs: options.apiTimeoutMs,
+					idleSettleMs: options.idleSettleMs,
 					loopState: options.loopState,
 				})
 
@@ -358,12 +382,26 @@ export function createRalphLoopEventHandler(
 						return
 					}
 
-					const committed = options.loopState.incrementIteration()
+					const committed = options.loopState.incrementIteration({
+						iteration: stateBeforeCommit.iteration,
+						sessionID: result.sessionID,
+					})
 					if (committed) {
 						showIterationToast(ctx, committed)
 					} else {
 						log(`[${HOOK_NAME}] Dispatch succeeded but iteration commit failed`, { sessionID })
+						options.loopState.clear()
+						showToastBestEffort(ctx, {
+							title: "Ralph Loop Failed",
+							message: "Dispatch succeeded but iteration commit failed",
+							variant: "warning",
+							duration: 5000,
+						})
 					}
+					return
+				}
+				if (result.status === "dispatch_deferred") {
+					log(`[${HOOK_NAME}] Dispatch deferred`, { sessionID, reason: result.reason })
 					return
 				}
 
@@ -389,7 +427,7 @@ export function createRalphLoopEventHandler(
 		}
 
 		if (event.type === "session.error") {
-			const sessionID = props?.sessionID as string | undefined
+			const sessionID = resolveSessionEventID(props)
 			const error = props?.error
 			if (!sessionID || isAbortError(error)) {
 				handleErroredLoopSession(props, options.loopState)
@@ -470,6 +508,10 @@ export function createRalphLoopEventHandler(
 					})
 					return
 				}
+				if (await isSessionActive(ctx.client, sessionID)) {
+					log(`[${HOOK_NAME}] Skipped: session became active during settle window`, { sessionID })
+					return
+				}
 				if (stateAfterSettle.verification_pending) {
 					log(`[${HOOK_NAME}] Skipped: state entered verification_pending during settle window`, { sessionID })
 					return
@@ -490,6 +532,7 @@ export function createRalphLoopEventHandler(
 					previousSessionID: sessionID,
 					directory: options.directory,
 					apiTimeoutMs: options.apiTimeoutMs,
+					idleSettleMs: options.idleSettleMs,
 					loopState: options.loopState,
 				})
 
@@ -509,13 +552,27 @@ export function createRalphLoopEventHandler(
 						return
 					}
 
-					const committed = options.loopState.incrementIteration()
+					const committed = options.loopState.incrementIteration({
+						iteration: stateBeforeCommit.iteration,
+						sessionID: result.sessionID,
+					})
 					if (committed) {
 						showIterationToast(ctx, committed)
 						runtimeErrorRetriedSessions.set(sessionID, committed.iteration)
 					} else {
 						log(`[${HOOK_NAME}] Dispatch succeeded but iteration commit failed after runtime error`, { sessionID })
+						options.loopState.clear()
+						showToastBestEffort(ctx, {
+							title: "Ralph Loop Failed",
+							message: "Dispatch succeeded but iteration commit failed",
+							variant: "warning",
+							duration: 5000,
+						})
 					}
+					return
+				}
+				if (result.status === "dispatch_deferred") {
+					log(`[${HOOK_NAME}] Dispatch deferred after runtime error`, { sessionID, reason: result.reason })
 					return
 				}
 
