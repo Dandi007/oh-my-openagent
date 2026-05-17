@@ -3,6 +3,7 @@ import type { InstallArgs } from "./types"
 import { runCliInstaller } from "./cli-installer"
 import { runTuiInstaller } from "./tui-installer"
 
+// package.json carries <official>-qinglin-dev.<commit> for personal fork builds.
 const VERSION = packageJson.version
 
 export async function install(args: InstallArgs): Promise<number> {

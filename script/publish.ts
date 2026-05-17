@@ -6,6 +6,7 @@ import { join } from "node:path"
 
 const PACKAGE_NAME = "oh-my-opencode"
 const bump = process.env.BUMP as "major" | "minor" | "patch" | undefined
+// VERSION may be a qinglin-dev prerelease label when publishing a personal fork build.
 const versionOverride = process.env.VERSION
 const republishMode = process.env.REPUBLISH === "true"
 const prepareOnly = process.argv.includes("--prepare-only")
