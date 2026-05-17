@@ -130,6 +130,50 @@ describe("createBackgroundOutput block=true polling", () => {
     expect(output).not.toContain("Timed out waiting")
   })
 
+  test("recovers task from durable metadata when getTask misses but durable store has it", async () => {
+    // #given — task evicted from memory but durable metadata persists
+    const durableTask: BackgroundTask = {
+      id: "bg_durable_evicted",
+      sessionId: "ses-durable-child",
+      parentSessionId: "main-1",
+      parentMessageId: "msg-1",
+      description: "durable background task",
+      prompt: "do work",
+      agent: "test-agent",
+      status: "completed",
+      category: "quick",
+      startedAt: new Date("2026-01-01T00:00:00Z"),
+      completedAt: new Date("2026-01-01T00:01:00Z"),
+    }
+    const manager: BackgroundOutputManager = {
+      getTask: (_id: string) => undefined,
+      getDurableTask: (id: string) => (id === durableTask.id ? durableTask : undefined),
+    }
+    const client: BackgroundOutputClient = {
+      session: {
+        messages: async () => ({
+          data: [
+            {
+              id: "m1",
+              info: { role: "assistant", time: "2026-01-01T00:00:00Z" },
+              parts: [{ type: "text", text: "durable result" }],
+            },
+          ],
+        }),
+      },
+    }
+
+    const tool = createBackgroundOutput(manager, client)
+
+    // #when
+    const output = await tool.execute({ task_id: durableTask.id }, mockContext)
+
+    // #then
+    expect(output).toContain("Task Result")
+    expect(output).toContain("durable result")
+    expect(output).not.toContain("Task not found")
+  })
+
   test("returns legacy status output with timeout note when task stays running", async () => {
     // #given
     let pollCount = 0

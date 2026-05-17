@@ -63,18 +63,30 @@ async function getTaskWithMissingRetry(
   await delay(MISSING_BACKGROUND_TASK_RETRY_DELAY_MS)
   const retriedTask = manager.getTask(taskId)
 
-  log(
-    retriedTask
-      ? "[background_output] recovered background task after missing lookup retry"
-      : "[background_output] background task still missing after retry",
-    {
+  if (retriedTask) {
+    log("[background_output] recovered background task after missing lookup retry", {
       taskId,
-      status: retriedTask?.status,
-      sessionId: retriedTask?.sessionId,
-    }
-  )
+      status: retriedTask.status,
+      sessionId: retriedTask.sessionId,
+    })
+    return retriedTask
+  }
 
-  return retriedTask
+  const durableTask = manager.getDurableTask?.(taskId)
+  if (durableTask) {
+    log("[background_output] recovered background task from durable metadata", {
+      taskId,
+      status: durableTask.status,
+      sessionId: durableTask.sessionId,
+    })
+    return durableTask
+  }
+
+  log("[background_output] background task still missing after retry and durable fallback", {
+    taskId,
+  })
+
+  return undefined
 }
 
 function formatTaskNotFoundMessage(taskId: string): string {

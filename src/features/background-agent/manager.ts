@@ -94,6 +94,7 @@ import {
   type SubagentSpawnContext,
 } from "./subagent-spawn-limits"
 import { ParentWakeNotifier, type ParentWakePromptContext } from "./parent-wake-notifier"
+import { DurableTaskMetadataStore } from "./durable-task-metadata"
 type OpencodeClient = PluginInput["client"]
 
 type ResumeTaskSnapshot = {
@@ -250,6 +251,7 @@ export class BackgroundManager {
   private loggedSessionStatusUnavailable = false
   readonly taskHistory = new TaskHistory()
   private cachedCircuitBreakerSettings?: CircuitBreakerSettings
+  readonly durableStore: DurableTaskMetadataStore
 
   constructor(config: BackgroundManagerConfig) {
     const { pluginContext, ...options } = config
@@ -260,6 +262,7 @@ export class BackgroundManager {
     this.pendingByParent = new Map()
     this.client = pluginContext.client
     this.directory = pluginContext.directory
+    this.durableStore = new DurableTaskMetadataStore(this.directory)
     this.concurrencyManager = new ConcurrencyManager(options.config)
     this.config = options.config
     this.tmuxEnabled = options?.tmuxConfig?.enabled ?? false
@@ -417,6 +420,7 @@ export class BackgroundManager {
     }
 
     this.completedTaskArchive.set(task.id, archivedTask)
+    this.recordDurableTaskMetadata(task)
     if (this.completedTaskArchive.size <= MAX_COMPLETED_TASK_ARCHIVE_SIZE) {
       return
     }
@@ -425,6 +429,26 @@ export class BackgroundManager {
     if (typeof oldestTaskID === "string") {
       this.completedTaskArchive.delete(oldestTaskID)
     }
+  }
+
+  private recordDurableTaskMetadata(task: BackgroundTask): void {
+    if (!task.sessionId) {
+      return
+    }
+
+    this.durableStore.set(task.id, {
+      id: task.id,
+      sessionId: task.sessionId,
+      status: task.status,
+      description: task.description,
+      agent: task.agent,
+      category: task.category,
+      parentSessionId: task.parentSessionId,
+      parentMessageId: task.parentMessageId,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+      error: task.error,
+    })
   }
 
   private updateTaskParent(task: BackgroundTask, parentSessionID: string): void {
@@ -765,6 +789,7 @@ export class BackgroundManager {
     }
     task.concurrencyKey = concurrencyKey
     task.concurrencyGroup = concurrencyKey
+    this.recordDurableTaskMetadata(task)
 
     if (task.retryNotification) {
       const attemptNumber = boundAttempt.attemptNumber
@@ -961,6 +986,14 @@ The fallback retry session is now created and can be inspected directly.
 
   getTask(id: string): BackgroundTask | undefined {
     return this.tasks.get(id) ?? this.completedTaskArchive.get(id)
+  }
+
+  getDurableTask(id: string): BackgroundTask | undefined {
+    const metadata = this.durableStore.get(id)
+    if (!metadata) {
+      return undefined
+    }
+    return this.durableStore.toBackgroundTask(metadata)
   }
 
   getTasksByParentSession(sessionID: string): BackgroundTask[] {
