@@ -12,6 +12,7 @@ import type { GetLocalVersionOptions } from "./get-local-version/types"
 import type { DoctorOptions } from "./doctor"
 import packageJson from "../../package.json" with { type: "json" }
 
+// package.json carries <official>-qinglin-dev.<commit> for personal fork builds.
 const VERSION = packageJson.version
 
 const program = new Command()

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { randomUUID } from "node:crypto"
 import { SYSTEM_DIRECTIVE_PREFIX } from "../../shared/system-directive"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
+import { writeBoulderState } from "../../features/boulder-state"
 // Force stable (JSON) mode for tests that rely on message file storage
 mock.module("../../shared/opencode-storage-detection", () => ({
   isSqliteBackend: () => false,
@@ -487,7 +488,24 @@ describe("prometheus-md-only", () => {
 
   describe("boulder state priority over message files (fixes #927)", () => {
     const BOULDER_DIR = join(tmpdir(), `boulder-test-${randomUUID()}`)
-    const BOULDER_FILE = join(BOULDER_DIR, ".sisyphus", "boulder.json")
+
+    function writeV3BoulderState(agent: string, sessionIds: string[]): void {
+      const startedAt = new Date().toISOString()
+      writeBoulderState(BOULDER_DIR, {
+        schema_version: 3,
+        works: {
+          "test-plan-legacy": {
+            work_id: "test-plan-legacy",
+            active_plan: "/test/plan.md",
+            started_at: startedAt,
+            updated_at: startedAt,
+            session_ids: sessionIds,
+            plan_name: "test-plan",
+            agent,
+          },
+        },
+      })
+    }
 
     beforeEach(() => {
       mkdirSync(join(BOULDER_DIR, ".sisyphus"), { recursive: true })
@@ -504,13 +522,7 @@ describe("prometheus-md-only", () => {
       setupMessageStorage(TEST_SESSION_ID, undefined)
       
       // given - atlas in boulder state (from /start-work)
-      writeFileSync(BOULDER_FILE, JSON.stringify({
-        active_plan: "/test/plan.md",
-        started_at: new Date().toISOString(),
-        session_ids: [TEST_SESSION_ID],
-        plan_name: "test-plan",
-        agent: "atlas"
-      }))
+      writeV3BoulderState("atlas", [TEST_SESSION_ID])
 
       const hook = createPrometheusMdOnlyHook({
         client: {},
@@ -537,13 +549,7 @@ describe("prometheus-md-only", () => {
       setupMessageStorage(TEST_SESSION_ID, "atlas", { useSessionAgent: false })
       
       // given - prometheus in boulder state (edge case, but should honor it)
-      writeFileSync(BOULDER_FILE, JSON.stringify({
-        active_plan: "/test/plan.md",
-        started_at: new Date().toISOString(),
-        session_ids: [TEST_SESSION_ID],
-        plan_name: "test-plan",
-        agent: "prometheus"
-      }))
+      writeV3BoulderState("prometheus", [TEST_SESSION_ID])
 
       const hook = createPrometheusMdOnlyHook({
         client: {},
@@ -570,13 +576,7 @@ describe("prometheus-md-only", () => {
       setupMessageStorage(TEST_SESSION_ID, "prometheus")
       
       // given - boulder state exists but for different session
-      writeFileSync(BOULDER_FILE, JSON.stringify({
-        active_plan: "/test/plan.md",
-        started_at: new Date().toISOString(),
-        session_ids: ["ses_other_session_id"],
-        plan_name: "test-plan",
-        agent: "atlas"
-      }))
+      writeV3BoulderState("atlas", ["ses_other_session_id"])
 
       const hook = createPrometheusMdOnlyHook({
         client: {},

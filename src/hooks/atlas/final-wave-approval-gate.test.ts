@@ -12,6 +12,23 @@ import { createAtlasHook } from "./index"
 type AtlasHookContext = Parameters<typeof createAtlasHook>[0]
 type PromptMock = ReturnType<typeof mock>
 
+function createTestBoulderState(planPath: string, planName: string, sessionID: string): BoulderState {
+  return {
+    schema_version: 3,
+    works: {
+      "test-work": {
+        work_id: "test-work",
+        active_plan: planPath,
+        started_at: "2026-01-02T10:00:00Z",
+        session_ids: [sessionID],
+        plan_name: planName,
+        agent: "atlas",
+        status: "active",
+      },
+    },
+  }
+}
+
 describe("Atlas final verification approval gate", () => {
   let testDirectory = ""
 
@@ -97,13 +114,7 @@ describe("Atlas final verification approval gate", () => {
 `,
     )
 
-    const state: BoulderState = {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "final-wave-plan",
-      agent: "atlas",
-    }
+    const state = createTestBoulderState(planPath, "final-wave-plan", sessionID)
     writeBoulderState(testDirectory, state)
 
     const mockInput = createMockPluginInput()
@@ -151,13 +162,7 @@ session_id: ses_final_wave_review
 `,
     )
 
-    const state: BoulderState = {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "implementation-plan",
-      agent: "atlas",
-    }
+    const state = createTestBoulderState(planPath, "implementation-plan", sessionID)
     writeBoulderState(testDirectory, state)
 
     const hook = createAtlasHook(createMockPluginInput(), {

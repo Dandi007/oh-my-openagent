@@ -210,11 +210,11 @@ PER-TASK ELAPSED:
 FINAL WAVE: F1 [...] | F2 [...] | F3 [...] | F4 [...]
 \`\`\`
 
-2. Confirm via your tools that the active work in \`.sisyphus/boulder.json\` now has \`status: "completed"\` and \`elapsed_ms\` populated. The hook calls \`completeBoulder()\` for you; you are reading state, not writing it.
+2. Confirm via your tools that the active work in \`.sisyphus/boulder/{work_id}.json\` now has \`status: "completed"\` and \`elapsed_ms\` populated. The hook calls \`completeBoulder()\` for you; you are reading state, not writing it.
 
 3. Mark the \`pass-final-wave\` todo as \`completed\` only after the Final Verification Wave reviewers all APPROVE. If the wave has not run yet, run it now in parallel; the boulder-complete nudge does not bypass it.
 
-The nudge fires at most once per work. If you missed it (compaction, session restart), read \`boulder.json\` yourself, compute the same summary from \`started_at\`, \`ended_at\`, and \`task_sessions[*].elapsed_ms\`, and print it.
+The nudge fires at most once per work. If you missed it (compaction, session restart), read \`.sisyphus/boulder/{work_id}.json\` yourself, compute the same summary from \`started_at\`, \`ended_at\`, and \`task_sessions[*].elapsed_ms\`, and print it.
 </boulder_completion_response>`
 
 export function buildAtlasPrompt(sections: AtlasPromptSections): string {

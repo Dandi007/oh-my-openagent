@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import type { AssistantMessage, Session } from "@opencode-ai/sdk"
 import type { BoulderState } from "../../features/boulder-state"
+import type { BoulderWorkState } from "../../features/boulder-state"
 import { clearBoulderState, writeBoulderState } from "../../features/boulder-state"
 
 const TEST_STORAGE_ROOT = join(tmpdir(), `atlas-final-wave-regression-storage-${randomUUID()}`)
@@ -101,11 +102,18 @@ describe("Atlas final-wave approval gate regressions", () => {
     writeFileSync(planPath, planContent)
 
     const state: BoulderState = {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: planName,
-      agent: "atlas",
+      schema_version: 3,
+      works: {
+        "test-work": {
+          work_id: "test-work",
+          active_plan: planPath,
+          started_at: "2026-01-02T10:00:00Z",
+          session_ids: [sessionID],
+          plan_name: planName,
+          agent: "atlas",
+          status: "active",
+        } satisfies BoulderWorkState,
+      },
     }
 
     writeBoulderState(testDirectory, state)

@@ -13,30 +13,31 @@ export const START_WORK_TEMPLATE = `You are starting a Sisyphus work session.
 
 1. **Find available plans**: Search for Prometheus-generated plan files at \`.sisyphus/plans/\`
 
-2. **Check for active boulder state**: Read \`.sisyphus/boulder.json\` if it exists
+2. **Check for active boulder state**: Read \`.sisyphus/boulder/\` directory if it exists (v3 multi-file storage)
 
 3. **Decision logic**:
-   - If multiple active works are listed in your context:
-     - This means boulder.json has more than one work with status: \`active\` or \`paused\`
-     - Use the Question tool to ask the user which plan to resume
-     - Resume by running \`/start-work {plan-name}\` for the selected plan
-     - If the user says "start a new plan", continue with cold-start auto-selection logic
-   - If exactly one active work is listed and the user did not name a plan:
-     - Auto-resume that single active work
-   - If no active plan OR plan is complete:
+   - If the current session is already bound to an active or paused work:
+     - Resume that exact work — the session is already tracked in its \`session_ids\`
+     - Do NOT append the session again; it is already present
+   - If the current session is NOT bound to any work AND active/paused works exist:
+     - List the active/paused works and ask the user to select one
+     - The user MUST specify an explicit plan: \`/start-work <plan-name>\`
+     - Do NOT auto-resume any work — the current session is unbound
+   - If no active or paused works exist:
      - List available plan files
      - If ONE plan: auto-select it
      - If MULTIPLE plans: show list with timestamps, ask user to select
 
-4. **Worktree Setup** (ONLY when \`--worktree\` was explicitly specified and \`worktree_path\` not already set in boulder.json):
+4. **Worktree Setup** (ONLY when \`--worktree\` was explicitly specified and \`worktree_path\` not already set in the boulder work file):
    1. \`git worktree list --porcelain\` - see available worktrees
    2. Create: \`git worktree add <absolute-path> <branch-or-HEAD>\`
-   3. Update boulder.json to add \`"worktree_path": "<absolute-path>"\`
+   3. Update the boulder work file to add \`"worktree_path": "<absolute-path>"\`
    4. All work happens inside that worktree directory
 
-5. **Create/Update boulder.json**:
+5. **Create/Update boulder work file** (stored at \`.sisyphus/boulder/{work_id}.json\`):
    \`\`\`json
    {
+     "work_id": "plan-name-xxxxxxxx",
      "active_plan": "/absolute/path/to/plan.md",
      "started_at": "ISO_TIMESTAMP",
      "session_ids": ["session_id_1", "session_id_2"],
@@ -68,7 +69,7 @@ Resuming Work Session
 
 Active Plan: {plan-name}
 Progress: {completed}/{total} tasks
-Sessions: {count} (appending current session)
+Sessions: {count} (current session already tracked)
 Worktree: {worktree_path}
 
 Reading plan and continuing from last incomplete task...
@@ -89,8 +90,8 @@ Reading plan and beginning execution...
 ## CRITICAL
 
 - The session_id is injected by the hook - use it directly
-- Always update boulder.json BEFORE starting work
-- If worktree_path is set in boulder.json, all work happens inside that worktree directory
+- Always update the boulder work file BEFORE starting work
+- If worktree_path is set in the boulder work file, all work happens inside that worktree directory
 - Read the FULL plan file before delegating any tasks
 - Follow atlas delegation protocols (7-section format)
 
@@ -117,7 +118,7 @@ Register these as task/todo items so progress is tracked and visible throughout 
 
 ## WORKTREE COMPLETION
 
-When working in a worktree (\`worktree_path\` is set in boulder.json) and ALL plan tasks are complete:
+When working in a worktree (\`worktree_path\` is set in the boulder work file) and ALL plan tasks are complete:
 1. Commit all remaining changes in the worktree
 2. **Sync .sisyphus state back**: Copy \`.sisyphus/\` from the worktree to the main repo before removal.
    This is CRITICAL when \`.sisyphus/\` is gitignored - state written during worktree execution would otherwise be lost.
@@ -127,6 +128,6 @@ When working in a worktree (\`worktree_path\` is set in boulder.json) and ALL pl
 3. Switch to the main working directory (the original repo, NOT the worktree)
 4. Merge the worktree branch into the current branch: \`git merge <worktree-branch>\`
 5. If merge succeeds, clean up: \`git worktree remove <worktree-path>\`
-6. Remove the boulder.json state
+6. Remove the boulder state
 
 This is the DEFAULT behavior when \`--worktree\` was used. Skip merge only if the user explicitly instructs otherwise (e.g., asks to create a PR instead).`

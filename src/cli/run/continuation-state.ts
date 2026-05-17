@@ -1,4 +1,4 @@
-import { getPlanProgress, readBoulderState, resolveBoulderPlanPath } from "../../features/boulder-state"
+import { getPlanProgress, getWorkForSessionStrict, resolveBoulderPlanPathForWork } from "../../features/boulder-state"
 import { getSessionAgent } from "../../features/claude-code-session-state"
 import {
   getActiveContinuationMarkerReason,
@@ -44,20 +44,24 @@ async function hasActiveBoulderContinuation(
   sessionID: string,
   client?: RunContext["client"],
 ): Promise<boolean> {
-  const boulder = readBoulderState(directory)
-  if (!boulder) return false
+  const { work, error } = getWorkForSessionStrict(directory, sessionID)
+  if (error) {
+    console.error(`[hasActiveBoulderContinuation] ${error}`)
+    return false
+  }
+  if (!work) return false
 
-  const progress = getPlanProgress(resolveBoulderPlanPath(directory, boulder))
+  const progress = getPlanProgress(resolveBoulderPlanPathForWork(directory, work))
   if (progress.isComplete) return false
   if (!client) return false
 
-  const isTrackedSession = boulder.session_ids.includes(sessionID)
-  const sessionOrigin = boulder.session_origins?.[sessionID]
+  const isTrackedSession = work.session_ids.includes(sessionID)
+  const sessionOrigin = work.session_origins?.[sessionID]
   if (!isTrackedSession) {
     return false
   }
 
-  const isTrackedDescendant = await isTrackedDescendantSession(client, sessionID, boulder.session_ids)
+  const isTrackedDescendant = await isTrackedDescendantSession(client, sessionID, work.session_ids)
 
   if (isTrackedSession && sessionOrigin === "direct") {
     return true
@@ -73,7 +77,7 @@ async function hasActiveBoulderContinuation(
     return false
   }
 
-  const requiredAgentKey = getAgentConfigKey(boulder.agent ?? "atlas")
+  const requiredAgentKey = getAgentConfigKey(work.agent ?? "atlas")
   const sessionAgentKey = getAgentConfigKey(sessionAgent)
   if (
     sessionAgentKey !== requiredAgentKey

@@ -85,11 +85,18 @@ describe("atlas hook compaction agent filtering", () => {
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
 
     const state: BoulderState = {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [sessionID],
-      plan_name: "test-plan",
-      agent: "atlas",
+      schema_version: 3,
+      works: {
+        "test-work": {
+          work_id: "test-work",
+          active_plan: planPath,
+          started_at: "2026-01-02T10:00:00Z",
+          session_ids: [sessionID],
+          plan_name: "test-plan",
+          agent: "atlas",
+          status: "active",
+        },
+      },
     }
     writeBoulderState(testDirectory, state)
     writeMessage(sessionID, "msg_001.json", "atlas")

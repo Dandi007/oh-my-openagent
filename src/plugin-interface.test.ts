@@ -14,6 +14,10 @@ import {
   updateSessionAgent,
 } from "./features/claude-code-session-state"
 
+function firstBoulderWork(directory: string) {
+  const state = readBoulderState(directory)
+  return state ? Object.values(state.works)[0] : undefined
+}
 
 describe("createPluginInterface - command.execute.before", () => {
   let testDir = ""
@@ -35,10 +39,29 @@ describe("createPluginInterface - command.execute.before", () => {
   test("executes start-work side effects for native command execution", async () => {
     // given
     updateSessionAgent("ses-command-before", "prometheus")
+    const promptAsyncCalls: Array<{
+      sessionID: string
+      agent: string
+      promptContains: string
+    }> = []
     const pluginInterface = createPluginInterface({
       ctx: {
         directory: testDir,
-        client: { tui: { showToast: async () => {} } },
+        client: {
+          tui: { showToast: async () => {} },
+          session: {
+            promptAsync: async (params: {
+              path: { id: string }
+              body: { agent: string; parts: Array<{ type: string; text?: string }> }
+            }) => {
+              promptAsyncCalls.push({
+                sessionID: params.path.id,
+                agent: params.body.agent,
+                promptContains: params.body.parts[0]?.text ?? "",
+              })
+            },
+          },
+        },
       } as never,
       pluginConfig: {} as never,
       firstMessageVariantGate: {
@@ -52,7 +75,21 @@ describe("createPluginInterface - command.execute.before", () => {
         autoSlashCommand: createAutoSlashCommandHook({ skills: [] }),
         startWork: createStartWorkHook({
           directory: testDir,
-          client: { tui: { showToast: async () => {} } },
+          client: {
+            tui: { showToast: async () => {} },
+            session: {
+              promptAsync: async (params: {
+                path: { id: string }
+                body: { agent: string; parts: Array<{ type: string; text?: string }> }
+              }) => {
+                promptAsyncCalls.push({
+                  sessionID: params.path.id,
+                  agent: params.body.agent,
+                  promptContains: params.body.parts[0]?.text ?? "",
+                })
+              },
+            },
+          },
         } as never),
       } as never,
       tools: {},
@@ -76,7 +113,14 @@ describe("createPluginInterface - command.execute.before", () => {
     expect(output.parts[0]?.text).toContain("Auto-Selected Plan")
     expect(output.parts[0]?.text).toContain("boulder.json has been created")
     expect(getSessionAgent("ses-command-before")).toBe("sisyphus")
-    expect(readBoulderState(testDir)?.agent).toBe("sisyphus")
+    expect(firstBoulderWork(testDir)?.agent).toBe("sisyphus")
+
+    // Verify CLI continuation injection
+    expect(promptAsyncCalls.length).toBe(1)
+    expect(promptAsyncCalls[0].sessionID).toBe("ses-command-before")
+    expect(promptAsyncCalls[0].agent).toBe("sisyphus")
+    expect(promptAsyncCalls[0].promptContains).toContain("Continue working")
+    expect(promptAsyncCalls[0].promptContains).toContain("worker-plan")
   })
 
   test("does not run start-work side effects for other native commands with session context", async () => {
@@ -167,7 +211,7 @@ describe("createPluginInterface - command.execute.before", () => {
     // then
     expect(output.message.agent).toBe("atlas")
     expect(getSessionAgent("ses-command-atlas")).toBe("atlas")
-    expect(readBoulderState(testDir)?.agent).toBe("atlas")
+    expect(firstBoulderWork(testDir)?.agent).toBe("atlas")
   })
 })
 

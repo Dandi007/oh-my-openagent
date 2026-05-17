@@ -3,12 +3,13 @@ import {
   endTaskTimer,
   getWorkForSession,
   getPlanProgress,
-  getTaskSessionState,
+  getTaskSessionStateForWork,
   readBoulderState,
-  resolveBoulderPlanPath,
+  rebuildIndexFromWorkFiles,
   resolveBoulderPlanPathForWork,
   startTaskTimer,
   upsertTaskSessionState,
+  writeBoulderIndex,
 } from "../../features/boulder-state"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
@@ -146,6 +147,16 @@ export function createToolExecuteAfterHandler(input: {
       return
     }
 
+    // Auto-rebuild boulder index after any tool execution.
+    // Agents may write to .sisyphus/boulder/ via apply_patch, bypassing writeBoulderState.
+    try {
+      const boulderDir = `${ctx.directory}/.sisyphus/boulder`
+      if (existsSync(boulderDir)) {
+        const index = rebuildIndexFromWorkFiles(ctx.directory)
+        writeBoulderIndex(ctx.directory, index)
+      }
+    } catch { /* best effort */ }
+
     if (isWriteOrEditToolName(toolInput.tool)) {
       let filePath = toolInput.callID ? pendingFilePaths.get(toolInput.callID) : undefined
       const planSnapshot = toolInput.callID && pendingPlanSnapshots
@@ -214,36 +225,18 @@ export function createToolExecuteAfterHandler(input: {
     }
 
     if (toolOutput.output && typeof toolOutput.output === "string") {
-      const worktreePath = boulderState?.worktree_path?.trim()
-      const verificationDirectory = worktreePath ? worktreePath : ctx.directory
-      const gitStats = collectGitDiffStatsImpl(verificationDirectory)
-      const fileChanges = formatFileChangesImpl(gitStats)
+      const sessionWork = toolInput.sessionID
+        ? getWorkForSession(ctx.directory, toolInput.sessionID)
+        : null
       const extractedSessionId = metadataSessionId ?? extractSessionIdFromOutput(toolOutput.output)
 
-      if (boulderState) {
-        const sessionWork = toolInput.sessionID
-          ? getWorkForSession(ctx.directory, toolInput.sessionID)
-          : null
-        const planPath = sessionWork
-          ? resolveBoulderPlanPathForWork(ctx.directory, sessionWork)
-          : resolveBoulderPlanPath(ctx.directory, boulderState)
-        const workScopedBoulderState = sessionWork
-          ? {
-              ...boulderState,
-              active_plan: sessionWork.active_plan,
-              plan_name: sessionWork.plan_name,
-              status: sessionWork.status,
-              started_at: sessionWork.started_at,
-              ended_at: sessionWork.ended_at,
-              elapsed_ms: sessionWork.elapsed_ms,
-              updated_at: sessionWork.updated_at,
-              session_ids: [...sessionWork.session_ids],
-              session_origins: sessionWork.session_origins ? { ...sessionWork.session_origins } : {},
-              agent: sessionWork.agent,
-              worktree_path: sessionWork.worktree_path,
-              task_sessions: sessionWork.task_sessions ? { ...sessionWork.task_sessions } : {},
-            }
-          : boulderState
+      if (sessionWork) {
+        const worktreePath = sessionWork.worktree_path?.trim()
+        const verificationDirectory = worktreePath ? worktreePath : ctx.directory
+        const gitStats = collectGitDiffStatsImpl(verificationDirectory)
+        const fileChanges = formatFileChangesImpl(gitStats)
+
+        const planPath = resolveBoulderPlanPathForWork(ctx.directory, sessionWork)
         const progress = getPlanProgress(planPath)
         const {
           currentTask,
@@ -251,11 +244,11 @@ export function createToolExecuteAfterHandler(input: {
           shouldIgnoreCurrentSessionId,
         } = resolveTaskContext(pendingTaskRef, planPath)
         const trackedTaskSession = currentTask
-          ? getTaskSessionState(ctx.directory, currentTask.key)
+          ? getTaskSessionStateForWork(ctx.directory, sessionWork.work_id, currentTask.key)
           : null
         const sessionState = toolInput.sessionID ? getState(toolInput.sessionID) : undefined
 
-        const lineageSessionIDs = sessionWork?.session_ids ?? boulderState.session_ids
+        const lineageSessionIDs = sessionWork.session_ids
         const subagentSessionId = await validateSubagentSessionId({
           client: ctx.client,
           sessionID: extractedSessionId,
@@ -263,27 +256,16 @@ export function createToolExecuteAfterHandler(input: {
         })
 
         if (currentTask && subagentSessionId && !shouldSkipTaskSessionUpdate) {
-          if (sessionWork) {
-            startTaskTimer(ctx.directory, sessionWork.work_id, {
-              taskKey: currentTask.key,
-              taskLabel: currentTask.label,
-              taskTitle: currentTask.title,
-              sessionId: subagentSessionId,
-              agent: typeof toolOutput.metadata?.agent === "string" ? toolOutput.metadata.agent : undefined,
-              category: typeof toolOutput.metadata?.category === "string" ? toolOutput.metadata.category : undefined,
-            })
-            if (isTrackedTaskChecked(planPath, currentTask.key)) {
-              endTaskTimer(ctx.directory, sessionWork.work_id, currentTask.key)
-            }
-          } else {
-            upsertTaskSessionState(ctx.directory, {
-              taskKey: currentTask.key,
-              taskLabel: currentTask.label,
-              taskTitle: currentTask.title,
-              sessionId: subagentSessionId,
-              agent: typeof toolOutput.metadata?.agent === "string" ? toolOutput.metadata.agent : undefined,
-              category: typeof toolOutput.metadata?.category === "string" ? toolOutput.metadata.category : undefined,
-            })
+          startTaskTimer(ctx.directory, sessionWork.work_id, {
+            taskKey: currentTask.key,
+            taskLabel: currentTask.label,
+            taskTitle: currentTask.title,
+            sessionId: subagentSessionId,
+            agent: typeof toolOutput.metadata?.agent === "string" ? toolOutput.metadata.agent : undefined,
+            category: typeof toolOutput.metadata?.category === "string" ? toolOutput.metadata.category : undefined,
+          })
+          if (isTrackedTaskChecked(planPath, currentTask.key)) {
+            endTaskTimer(ctx.directory, sessionWork.work_id, currentTask.key)
           }
         }
 
@@ -312,11 +294,11 @@ export function createToolExecuteAfterHandler(input: {
         }
 
         const leadReminder = shouldPauseForApproval
-          ? buildFinalWaveApprovalReminder(workScopedBoulderState.plan_name, progress, preferredSessionId)
-          : buildCompletionGate(workScopedBoulderState.plan_name, preferredSessionId)
+          ? buildFinalWaveApprovalReminder(sessionWork.plan_name, progress, preferredSessionId)
+          : buildCompletionGate(sessionWork.plan_name, preferredSessionId)
         const followupReminder = shouldPauseForApproval
           ? null
-          : buildOrchestratorReminder(workScopedBoulderState.plan_name, progress, preferredSessionId, autoCommit, false)
+          : buildOrchestratorReminder(sessionWork.plan_name, progress, preferredSessionId, autoCommit, false)
 
         toolOutput.output = `
 <system-reminder>
@@ -339,7 +321,7 @@ ${
     : `<system-reminder>\n${followupReminder}\n</system-reminder>`
 }`
           log(`[${HOOK_NAME}] Output transformed for orchestrator mode (boulder)`, {
-          plan: workScopedBoulderState.plan_name,
+          plan: sessionWork.plan_name,
           progress: `${progress.completed}/${progress.total}`,
           fileCount: gitStats.length,
           preferredSessionId,
@@ -361,7 +343,7 @@ ${
 
         log(`[${HOOK_NAME}] Verification reminder appended for orchestrator`, {
           sessionID: toolInput.sessionID,
-          fileCount: gitStats.length,
+          fileCount: 0,
         })
       }
     }

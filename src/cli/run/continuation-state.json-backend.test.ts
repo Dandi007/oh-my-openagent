@@ -3,6 +3,7 @@ const { afterEach, describe, expect, mock, test, afterAll } = require("bun:test"
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { writeBoulderState } from "../../features/boulder-state"
 
 const testDirs: string[] = []
 
@@ -73,17 +74,25 @@ describe("getContinuationState JSON backend descendant coverage", () => {
     const planPath = join(plansDir, "json-descendant-plan.md")
     writeFileSync(planPath, "- [ ] unfinished task\n", "utf-8")
     mkdirSync(join(directory, ".sisyphus"), { recursive: true })
-    writeFileSync(join(directory, ".sisyphus", "boulder.json"), JSON.stringify({
-      active_plan: planPath,
-      started_at: new Date().toISOString(),
-      session_ids: ["ses_root_session", "ses_child_session"],
-      session_origins: {
-        "ses_root_session": "direct",
-        "ses_child_session": "appended",
+    const startedAt = new Date().toISOString()
+    writeBoulderState(directory, {
+      schema_version: 3,
+      works: {
+        "json-descendant-plan-legacy": {
+          work_id: "json-descendant-plan-legacy",
+          active_plan: planPath,
+          started_at: startedAt,
+          updated_at: startedAt,
+          session_ids: ["ses_root_session", "ses_child_session"],
+          session_origins: {
+            "ses_root_session": "direct",
+            "ses_child_session": "appended",
+          },
+          plan_name: "json-descendant-plan",
+          agent: "atlas",
+        },
       },
-      plan_name: "json-descendant-plan",
-      agent: "atlas",
-    }), "utf-8")
+    })
     writeJsonMessage("ses_child_session", "msg_001.json", "atlas")
     writeJsonMessage("ses_child_session", "msg_002.json", "compaction")
     sessionLastAgentBySessionID.set("ses_child_session", "atlas")
@@ -139,13 +148,21 @@ describe("getContinuationState JSON backend descendant coverage", () => {
     const planPath = join(plansDir, "json-random-id-plan.md")
     writeFileSync(planPath, "- [ ] unfinished task\n", "utf-8")
     mkdirSync(join(directory, ".sisyphus"), { recursive: true })
-    writeFileSync(join(directory, ".sisyphus", "boulder.json"), JSON.stringify({
-      active_plan: planPath,
-      started_at: new Date().toISOString(),
-      session_ids: ["ses_root_random"],
-      plan_name: "json-random-id-plan",
-      agent: "atlas",
-    }), "utf-8")
+    const startedAt2 = new Date().toISOString()
+    writeBoulderState(directory, {
+      schema_version: 3,
+      works: {
+        "json-random-id-plan-legacy": {
+          work_id: "json-random-id-plan-legacy",
+          active_plan: planPath,
+          started_at: startedAt2,
+          updated_at: startedAt2,
+          session_ids: ["ses_root_random"],
+          plan_name: "json-random-id-plan",
+          agent: "atlas",
+        },
+      },
+    })
     const sessionID = "ses_child_random"
     const messageDir = join(TEST_MESSAGE_STORAGE, sessionID)
     mkdirSync(messageDir, { recursive: true })

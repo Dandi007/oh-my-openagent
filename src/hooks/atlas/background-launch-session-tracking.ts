@@ -4,7 +4,6 @@ import {
   appendSessionIdForWork,
   getWorkForSession,
   type BoulderState,
-  resolveBoulderPlanPath,
   resolveBoulderPlanPathForWork,
   upsertTaskSessionState,
   upsertTaskSessionStateForWork,
@@ -33,8 +32,12 @@ export async function syncBackgroundLaunchSessionTracking(input: {
   }
 
   const trackedWork = getWorkForSession(ctx.directory, toolInput.sessionID)
+  if (!trackedWork) {
+    return
+  }
+
   const extractedSessionId = metadataSessionId ?? extractSessionIdFromOutput(toolOutput.output)
-  const lineageSessionIDs = trackedWork?.session_ids ?? boulderState.session_ids
+  const lineageSessionIDs = trackedWork.session_ids
   const subagentSessionId = await validateSubagentSessionId({
     client: ctx.client,
     sessionID: extractedSessionId,
@@ -50,39 +53,22 @@ export async function syncBackgroundLaunchSessionTracking(input: {
     return
   }
 
-  if (trackedWork) {
-    appendSessionIdForWork(ctx.directory, trackedWork.work_id, trackedSessionId, "appended")
-  } else {
-    appendSessionId(ctx.directory, trackedSessionId, "appended")
-  }
+  appendSessionIdForWork(ctx.directory, trackedWork.work_id, trackedSessionId, "appended")
 
   const { currentTask, shouldSkipTaskSessionUpdate } = resolveTaskContext(
     pendingTaskRef,
-    trackedWork
-      ? resolveBoulderPlanPathForWork(ctx.directory, trackedWork)
-      : resolveBoulderPlanPath(ctx.directory, boulderState),
+    resolveBoulderPlanPathForWork(ctx.directory, trackedWork),
   )
 
   if (currentTask && !shouldSkipTaskSessionUpdate) {
-    if (trackedWork) {
-      upsertTaskSessionStateForWork(ctx.directory, trackedWork.work_id, {
-        taskKey: currentTask.key,
-        taskLabel: currentTask.label,
-        taskTitle: currentTask.title,
-        sessionId: trackedSessionId,
-        agent: typeof toolOutput.metadata?.agent === "string" ? toolOutput.metadata.agent : undefined,
-        category: typeof toolOutput.metadata?.category === "string" ? toolOutput.metadata.category : undefined,
-      })
-    } else {
-      upsertTaskSessionState(ctx.directory, {
-        taskKey: currentTask.key,
-        taskLabel: currentTask.label,
-        taskTitle: currentTask.title,
-        sessionId: trackedSessionId,
-        agent: typeof toolOutput.metadata?.agent === "string" ? toolOutput.metadata.agent : undefined,
-        category: typeof toolOutput.metadata?.category === "string" ? toolOutput.metadata.category : undefined,
-      })
-    }
+    upsertTaskSessionStateForWork(ctx.directory, trackedWork.work_id, {
+      taskKey: currentTask.key,
+      taskLabel: currentTask.label,
+      taskTitle: currentTask.title,
+      sessionId: trackedSessionId,
+      agent: typeof toolOutput.metadata?.agent === "string" ? toolOutput.metadata.agent : undefined,
+      category: typeof toolOutput.metadata?.category === "string" ? toolOutput.metadata.category : undefined,
+    })
   }
 
   log(`[${HOOK_NAME}] Background launch session tracked`, {

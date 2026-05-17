@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { clearBoulderState, readBoulderState, writeBoulderState } from "../../features/boulder-state"
-import type { BoulderState } from "../../features/boulder-state"
+import type { BoulderState, BoulderWorkState } from "../../features/boulder-state"
 import { _resetForTesting, registerAgentName, setSessionAgent, subagentSessions } from "../../features/claude-code-session-state"
 import { unsafeTestValue } from "../../../test-support/unsafe-test-value"
 
@@ -17,16 +17,28 @@ describe("atlas hook idle-event session lineage", () => {
   let testDirectory = ""
   let promptCalls: Array<unknown> = []
 
-  function writeIncompleteBoulder(overrides: Partial<BoulderState> = {}): void {
+  function firstWork() {
+    const state = readBoulderState(testDirectory)
+    return state ? Object.values(state.works)[0] : undefined
+  }
+
+  function writeIncompleteBoulder(overrides: Partial<BoulderWorkState> = {}): void {
     const planPath = join(testDirectory, "test-plan.md")
     writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [ ] Task 2")
 
     const state: BoulderState = {
-      active_plan: planPath,
-      started_at: "2026-01-02T10:00:00Z",
-      session_ids: [MAIN_SESSION_ID],
-      plan_name: "test-plan",
-      ...overrides,
+      schema_version: 3,
+      works: {
+        "test-work": {
+          work_id: "test-work",
+          active_plan: planPath,
+          started_at: "2026-01-02T10:00:00Z",
+          session_ids: [MAIN_SESSION_ID],
+          plan_name: "test-plan",
+          status: "active",
+          ...overrides,
+        },
+      },
     }
 
     writeBoulderState(testDirectory, state)
@@ -97,7 +109,7 @@ describe("atlas hook idle-event session lineage", () => {
       },
     })
 
-    assert.equal(readBoulderState(testDirectory)?.session_ids.includes(unrelatedSubagentSessionID), false)
+    assert.equal(firstWork()?.session_ids.includes(unrelatedSubagentSessionID), false)
     assert.equal(promptCalls.length, 0)
   })
 
@@ -121,7 +133,7 @@ describe("atlas hook idle-event session lineage", () => {
       },
     })
 
-    assert.equal(readBoulderState(testDirectory)?.session_ids.includes(subagentSessionID), false)
+    assert.equal(firstWork()?.session_ids.includes(subagentSessionID), false)
     assert.equal(promptCalls.length, 0)
   })
 
@@ -143,7 +155,7 @@ describe("atlas hook idle-event session lineage", () => {
       },
     })
 
-    assert.equal(readBoulderState(testDirectory)?.session_ids.includes(subagentSessionID), false)
+    assert.equal(firstWork()?.session_ids.includes(subagentSessionID), false)
     assert.equal(promptCalls.length, 0)
   })
 
@@ -165,7 +177,7 @@ describe("atlas hook idle-event session lineage", () => {
       },
     })
 
-    assert.equal(readBoulderState(testDirectory)?.session_ids.includes(subagentSessionID), false)
+    assert.equal(firstWork()?.session_ids.includes(subagentSessionID), false)
     assert.equal(promptCalls.length, 0)
   })
 

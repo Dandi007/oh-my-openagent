@@ -11,6 +11,8 @@ import {
   createBoulderState,
   getBoulderFilePath,
   getWorkByPlanName,
+  listBoulderWorkIds,
+  readBoulderIndex,
   readBoulderState,
   writeBoulderState,
 } from "../../features/boulder-state"
@@ -81,14 +83,14 @@ describe("buildStartWorkContextInfo", () => {
     expect(clearSpy).toHaveBeenCalledTimes(0)
   })
 
-  test("auto-resumes when exactly one active work exists and no explicit plan", () => {
-    // given
+  test("does NOT auto-resume when exactly one active work exists but current session is unbound", () => {
+    // given: one active work with session "session-a", but current session is "session-current" (unbound)
     const clearSpy = spyOn(boulderState, "clearBoulderState")
     const planPath = writePlan("single-active-plan", "## TODOs\n- [ ] 1. Single task")
     const initialState = createBoulderState(planPath, "session-a", "atlas", "/tmp/worktree-single")
     writeBoulderState(testDirectory, initialState)
 
-    // when
+    // when: no-arg /start-work with a different session
     const contextInfo = buildStartWorkContextInfo({
       ctx: createPluginInput(),
       explicitPlanName: null,
@@ -100,11 +102,86 @@ describe("buildStartWorkContextInfo", () => {
       worktreeBlock: "",
     })
 
-    // then
-    expect(contextInfo).toContain("RESUMING existing work")
-    expect(contextInfo).toContain("single-active-plan")
-    expect(contextInfo).not.toContain("Use the Question tool")
+    // then: should NOT auto-resume — session is not in the work's session_ids
+    expect(contextInfo).not.toContain("RESUMING existing work")
+    expect(contextInfo).not.toContain("current session appended")
     expect(clearSpy).toHaveBeenCalledTimes(0)
+
+    // Verify no state mutation: session_ids unchanged, index unchanged
+    const state = readExistingState()
+    const work = state ? Object.values(state.works)[0] : undefined
+    expect(work?.session_ids).not.toContain("session-current")
+    expect(work?.session_ids).toEqual(["session-a"])
+
+    const index = readBoulderIndex(testDirectory)
+    expect(index?.sessions["session-current"]).toBeUndefined()
+  })
+
+  test("resumes when current session is already in the work's session_ids", () => {
+    // given: one active work that already includes the current session
+    const clearSpy = spyOn(boulderState, "clearBoulderState")
+    const planPath = writePlan("resume-same-session-plan", "## TODOs\n- [ ] 1. Task")
+    const initialState = createBoulderState(planPath, "session-current", "atlas", "/tmp/worktree-same")
+    writeBoulderState(testDirectory, initialState)
+
+    // when: no-arg /start-work with the same session
+    const contextInfo = buildStartWorkContextInfo({
+      ctx: createPluginInput(),
+      explicitPlanName: null,
+      existingState: readExistingState(),
+      sessionId: "session-current",
+      timestamp: "2026-05-11T00:00:00.000Z",
+      activeAgent: "atlas",
+      worktreePath: undefined,
+      worktreeBlock: "",
+    })
+
+    // then: should resume since session is already bound to this work
+    expect(contextInfo).toContain("RESUMING existing work")
+    expect(contextInfo).toContain("resume-same-session-plan")
+    expect(clearSpy).toHaveBeenCalledTimes(0)
+
+    // Verify no duplicate session id
+    const state = readExistingState()
+    const work = state ? Object.values(state.works)[0] : undefined
+    const sessionCount = work?.session_ids.filter((s) => s === "session-current").length ?? 0
+    expect(sessionCount).toBe(1)
+  })
+
+  test("explicit plan matching active work appends current session and resumes", () => {
+    // given: one active work with session "session-a", explicit plan name matches
+    const clearSpy = spyOn(boulderState, "clearBoulderState")
+    const planPath = writePlan("explicit-resume-plan", "## TODOs\n- [ ] 1. Task")
+    const initialState = createBoulderState(planPath, "session-a", "atlas", "/tmp/worktree-explicit")
+    writeBoulderState(testDirectory, initialState)
+
+    // when: /start-work explicit-resume-plan with a new session
+    const contextInfo = buildStartWorkContextInfo({
+      ctx: createPluginInput(),
+      explicitPlanName: "explicit-resume-plan",
+      existingState: readExistingState(),
+      sessionId: "session-current",
+      timestamp: "2026-05-11T00:00:00.000Z",
+      activeAgent: "atlas",
+      worktreePath: "/tmp/worktree-explicit",
+      worktreeBlock: "",
+    })
+
+    // then: should resume and append current session
+    expect(contextInfo).toContain("RESUMING existing work")
+    expect(contextInfo).toContain("explicit-resume-plan")
+    expect(contextInfo).toContain("current session appended")
+    expect(clearSpy).toHaveBeenCalledTimes(0)
+
+    // Verify session_ids now includes the new session
+    const state = readExistingState()
+    const work = state ? Object.values(state.works)[0] : undefined
+    expect(work?.session_ids).toContain("session-current")
+    expect(work?.session_ids).toContain("session-a")
+
+    // Verify index maps the new session to this work
+    const index = readBoulderIndex(testDirectory)
+    expect(index?.sessions["session-current"]).toBe(work?.work_id)
   })
 
   test("explicit plan selects matching work only and never clears boulder state", () => {
@@ -141,7 +218,7 @@ describe("buildStartWorkContextInfo", () => {
     const selectedWork = getWorkByPlanName(testDirectory, "explicit-plan-a", { worktreePath: "/tmp/worktree-a" })
     const nextState = readBoulderState(testDirectory)
     expect(selectedWork).not.toBeNull()
-    expect(nextState?.active_work_id).toBe(selectedWork?.work_id)
+    expect(nextState?.works[selectedWork!.work_id]).toBeDefined()
   })
 
   test("falls back to auto-select latest plan when no works exist", () => {
@@ -165,7 +242,8 @@ describe("buildStartWorkContextInfo", () => {
     expect(contextInfo).toContain("Auto-Selected Plan")
     expect(contextInfo).toContain("cold-start-plan")
     expect(contextInfo).toContain(coldStartPlanPath)
-    expect(existsSync(getBoulderFilePath(testDirectory))).toBe(true)
+    // v3: boulder state is stored as per-work files, not boulder.json
+    expect(listBoulderWorkIds(testDirectory).length).toBeGreaterThan(0)
     expect(clearSpy).toHaveBeenCalledTimes(0)
   })
 
@@ -183,7 +261,7 @@ describe("buildStartWorkContextInfo", () => {
     )
     writeBoulderState(testDirectory, initialState)
 
-    const workAId = initialState.active_work_id!
+    const workAId = Object.keys(initialState.works)[0]!
     const withSecondWork = addBoulderWork(testDirectory, {
       planPath: workBPath,
       sessionId: "session-b",

@@ -7,8 +7,9 @@ import {
   findPrometheusPlans,
   getPlanProgress,
   createBoulderState,
-  getPlanName,
   clearBoulderState,
+  getWorkForSessionStrict,
+  resolveBoulderPlanPathForWork,
 } from "../../features/boulder-state"
 import { log } from "../../shared/logger"
 import {
@@ -20,6 +21,8 @@ import { detectWorktreePath } from "./worktree-detector"
 import { parseUserRequest } from "./parse-user-request"
 import { buildStartWorkContextInfo } from "./context-info-builder"
 import { createWorktreeActiveBlock } from "./worktree-block"
+import { BOULDER_CONTINUATION_PROMPT } from "../atlas/system-reminder-templates"
+import { createInternalAgentTextPart } from "../../shared"
 
 export const HOOK_NAME = "start-work" as const
 const START_WORK_TEMPLATE_MARKER = "You are starting a Sisyphus work session."
@@ -130,6 +133,56 @@ export function createStartWorkHook(ctx: PluginInput) {
       output: StartWorkHookOutput,
     ): Promise<void> => {
       await processStartWork(input, output)
+
+      // Immediately inject Atlas continuation so CLI --command mode
+      // doesn't exit before Atlas runs its first orchestration prompt.
+      // In interactive mode (chat.message), the session.idle event handles this.
+      const sessionWorkResult = getWorkForSessionStrict(ctx.directory, input.sessionID)
+      if (sessionWorkResult.error) {
+        log(`[${HOOK_NAME}] Failed to resolve CLI continuation work for current session: ${sessionWorkResult.error}`, {
+          sessionID: input.sessionID,
+        })
+      }
+
+      const work = sessionWorkResult.work
+      if (!work) {
+        log(`[${HOOK_NAME}] No current-session work for CLI immediate continuation`, {
+          sessionID: input.sessionID,
+        })
+        return
+      }
+
+      const planPath = resolveBoulderPlanPathForWork(ctx.directory, work)
+      const progress = getPlanProgress(planPath)
+      if (progress.isComplete) return
+
+      const remaining = progress.total - progress.completed
+      const worktreeContext = work.worktree_path ? `\n\n[Worktree: ${work.worktree_path}]` : ""
+      const prompt =
+        BOULDER_CONTINUATION_PROMPT.replace(/{PLAN_NAME}/g, work.plan_name) +
+        `\n\n[Status: ${progress.completed}/${progress.total} completed, ${remaining} remaining]` +
+        worktreeContext
+
+      const continuationAgent = resolveRegisteredAgentName(
+        work.agent ?? (isAgentRegistered("atlas") ? "atlas" : undefined),
+      )
+
+      if (!continuationAgent || !isAgentRegistered(continuationAgent)) return
+
+      log(`[${HOOK_NAME}] Injecting immediate Atlas continuation for CLI mode`, {
+        sessionID: input.sessionID,
+        planName: work.plan_name,
+        remaining,
+      })
+
+      await ctx.client.session.promptAsync({
+        path: { id: input.sessionID },
+        body: {
+          agent: continuationAgent,
+          parts: [createInternalAgentTextPart(prompt)],
+        },
+        query: { directory: ctx.directory },
+      })
     },
   }
 }
